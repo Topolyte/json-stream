@@ -57,12 +57,12 @@ public class JsonOutputStream {
         self.context = context
     }
     
-    public func close() {
+    deinit {
         if isOwningStream {
             out.close()
         }
     }
-    
+        
     public func writeObject(f: (_ object: JsonOutputStream) throws -> ()) throws {
         try requireValueContext()
         try nextItem()
@@ -175,9 +175,9 @@ public class JsonOutputStream {
         try writeRaw("\"")
         
         if value.utf8.contains(where: {
-            $0 < Self.asciiSpace ||
-            $0 == Self.asciiQuote ||
-            $0 == Self.asciiBackslash })
+            $0 < asciiSpace ||
+            $0 == asciiQuote ||
+            $0 == asciiBackslash })
         {
             try writeRaw(escape(value))
         } else {
@@ -238,34 +238,25 @@ public class JsonOutputStream {
         }
     }
     
-    static let asciiQuote = Character("\"").asciiValue!
-    static let asciiBackslash = Character("\\").asciiValue!
-    static let asciiSpace = Character(" ").asciiValue!
-    static let asciiCr = Character("\r").asciiValue!
-    static let asciiLf = Character("\n").asciiValue!
-    static let asciiTab = Character("\t").asciiValue!
-    static let asciiFormFeed = UInt8(12)
-    static let asciiBackspace = UInt8(8)
-
     fileprivate func escape(_ s: String) -> String {
         var result = ""
         
         for c in s {
             if let ascii = c.asciiValue {
                 switch ascii {
-                case Self.asciiQuote:
+                case asciiQuote:
                     result.append("\\\"")
-                case Self.asciiBackslash:
+                case asciiBackslash:
                     result.append("\\")
-                case Self.asciiLf:
+                case asciiLf:
                     result.append("\\n")
-                case Self.asciiCr:
+                case asciiCr:
                     result.append("\\r")
-                case Self.asciiTab:
+                case asciiTab:
                     result.append("\\t")
-                case Self.asciiBackspace:
+                case asciiBackspace:
                     result.append("\\b")
-                case Self.asciiFormFeed:
+                case asciiFormFeed:
                     result.append("\\f")
                 default:
                     result.append(c)

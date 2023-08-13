@@ -5,6 +5,9 @@ import PackageDescription
 
 let package = Package(
     name: "JsonStream",
+    platforms: [
+        .macOS(.v13), .iOS(.v16)
+    ],
     products: [
         .library(
             name: "JsonStream",
