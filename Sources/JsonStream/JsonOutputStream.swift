@@ -175,9 +175,9 @@ public class JsonOutputStream {
         try writeRaw("\"")
         
         if value.utf8.contains(where: {
-            $0 < asciiSpace ||
-            $0 == asciiQuote ||
-            $0 == asciiBackslash })
+            $0 < Ascii.space ||
+            $0 == Ascii.quote ||
+            $0 == Ascii.backslash })
         {
             try writeRaw(escape(value))
         } else {
@@ -244,19 +244,19 @@ public class JsonOutputStream {
         for c in s {
             if let ascii = c.asciiValue {
                 switch ascii {
-                case asciiQuote:
+                case Ascii.quote:
                     result.append("\\\"")
-                case asciiBackslash:
+                case Ascii.backslash:
                     result.append("\\")
-                case asciiLf:
+                case Ascii.lf:
                     result.append("\\n")
-                case asciiCr:
+                case Ascii.cr:
                     result.append("\\r")
-                case asciiTab:
+                case Ascii.tab:
                     result.append("\\t")
-                case asciiBackspace:
+                case Ascii.backspace:
                     result.append("\\b")
-                case asciiFormFeed:
+                case Ascii.formFeed:
                     result.append("\\f")
                 default:
                     result.append(c)

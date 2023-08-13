@@ -33,37 +33,39 @@ public enum JsonError: Error {
     case invalidNumber(String)
 }
 
-let asciiQuote = Character("\"").asciiValue!
-let asciiBackslash = Character("\\").asciiValue!
-let asciiSlash = Character("/").asciiValue!
-let asciiSpace = Character(" ").asciiValue!
-let asciiCr = Character("\r").asciiValue!
-let asciiLf = Character("\n").asciiValue!
-let asciiTab = Character("\t").asciiValue!
-let asciiFormFeed = UInt8(12)
-let asciiBackspace = UInt8(8)
-let asciiLeftBrace = Character("{").asciiValue!
-let asciiRightBrace = Character("}").asciiValue!
-let asciiLeftSquare = Character("[").asciiValue!
-let asciiRightSquare = Character("]").asciiValue!
-let asciiComma = Character(",").asciiValue!
-let asciiColon = Character(":").asciiValue!
-let asciiZero = Character("0").asciiValue!
-let asciiNine = Character("9").asciiValue!
-let asciiMinus = Character("-").asciiValue!
-let asciiPlus = Character("+").asciiValue!
-let asciiDot = Character(".").asciiValue!
-let asciia = Character("a").asciiValue!
-let asciiA = Character("A").asciiValue!
-let asciie = Character("e").asciiValue!
-let asciiE = Character("E").asciiValue!
-let asciif = Character("f").asciiValue!
-let asciiF = Character("F").asciiValue!
-let asciin = Character("n").asciiValue!
-let asciir = Character("r").asciiValue!
-let asciit = Character("t").asciiValue!
-let asciib = Character("b").asciiValue!
-let asciiu = Character("u").asciiValue!
+public struct Ascii {
+    static let quote = Character("\"").asciiValue!
+    static let backslash = Character("\\").asciiValue!
+    static let slash = Character("/").asciiValue!
+    static let space = Character(" ").asciiValue!
+    static let cr = Character("\r").asciiValue!
+    static let lf = Character("\n").asciiValue!
+    static let tab = Character("\t").asciiValue!
+    static let formFeed = UInt8(12)
+    static let backspace = UInt8(8)
+    static let leftBrace = Character("{").asciiValue!
+    static let rightBrace = Character("}").asciiValue!
+    static let leftSquare = Character("[").asciiValue!
+    static let rightSquare = Character("]").asciiValue!
+    static let comma = Character(",").asciiValue!
+    static let colon = Character(":").asciiValue!
+    static let zero = Character("0").asciiValue!
+    static let nine = Character("9").asciiValue!
+    static let minus = Character("-").asciiValue!
+    static let plus = Character("+").asciiValue!
+    static let dot = Character(".").asciiValue!
+    static let a = Character("a").asciiValue!
+    static let A = Character("A").asciiValue!
+    static let e = Character("e").asciiValue!
+    static let E = Character("E").asciiValue!
+    static let f = Character("f").asciiValue!
+    static let F = Character("F").asciiValue!
+    static let n = Character("n").asciiValue!
+    static let r = Character("r").asciiValue!
+    static let t = Character("t").asciiValue!
+    static let b = Character("b").asciiValue!
+    static let u = Character("u").asciiValue!
+}
 
 
 

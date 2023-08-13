@@ -83,19 +83,19 @@ public final class JsonInputStream {
     public func read() throws -> JsonToken? {
         if let c = try nextContentByte() {
             switch c {
-            case asciiLeftBrace:
+            case Ascii.leftBrace:
                 context.append(.object)
                 return .startObject
-            case asciiRightBrace:
+            case Ascii.rightBrace:
                 pop()
                 return .endObject
-            case asciiLeftSquare:
+            case Ascii.leftSquare:
                 context.append(.array)
                 return .startArray
-            case asciiRightSquare:
+            case Ascii.rightSquare:
                 pop()
                 return .endArray
-            case asciiQuote:
+            case Ascii.quote:
                 if case .some(.object) = context.last {
                     let propertyName = try readPropertyStart()
                     context.append(.property(propertyName))
@@ -113,16 +113,16 @@ public final class JsonInputStream {
                     return try .string(readString())
                 }
             default:
-                if c == asciin {
+                if c == Ascii.n {
                     try mustRead("ull")
                     if case .some(.property) = context.last {
                         pop()
                     }
                     return .null
-                } else if c == asciit {
+                } else if c == Ascii.t {
                     try mustRead("rue")
                     return .bool(true)
-                } else if c == asciif {
+                } else if c == Ascii.f {
                     try mustRead("alse")
                     return .bool(false)
                 } else {
@@ -142,13 +142,13 @@ public final class JsonInputStream {
         var str = String(UnicodeScalar(firstChar))
         
         while let c = try nextByte() {
-            if isWhitespace(c) || c == asciiComma || c == asciiRightBrace || c == asciiRightSquare {
+            if isWhitespace(c) || c == Ascii.comma || c == Ascii.rightBrace || c == Ascii.rightSquare {
                 pos -= 1
                 break
             }
             
             switch c {
-            case asciiZero...asciiNine, asciiDot, asciie, asciiE, asciiPlus, asciiMinus:
+            case Ascii.zero...Ascii.nine, Ascii.dot, Ascii.e, Ascii.E, Ascii.plus, Ascii.minus:
                 if str.utf8.count == maxStringLength {
                     throw JsonError.stringTooLong
                 }
@@ -171,7 +171,7 @@ public final class JsonInputStream {
             throw JsonError.unexpectedEndOfStream
         }
         
-        guard c == asciiColon else {
+        guard c == Ascii.colon else {
             throw try unexpected(c, expected: ":")
         }
 
@@ -186,9 +186,9 @@ public final class JsonInputStream {
                 throw JsonError.stringTooLong
             }
             
-            if c == asciiBackslash {
+            if c == Ascii.backslash {
                 try readEscape()
-            } else if c == asciiQuote {
+            } else if c == Ascii.quote {
                 guard let s = String(data: bytes, encoding: .utf8) else {
                     throw JsonError.invalidUTF8
                 }
@@ -207,20 +207,20 @@ public final class JsonInputStream {
         }
         
         switch c {
-        case asciin:
-            bytes.append(asciiLf)
-        case asciiQuote, asciiBackslash, asciiSlash:
+        case Ascii.n:
+            bytes.append(Ascii.lf)
+        case Ascii.quote, Ascii.backslash, Ascii.slash:
             bytes.append(c)
-        case asciit:
-            bytes.append(asciiTab)
-        case asciiu:
+        case Ascii.t:
+            bytes.append(Ascii.tab)
+        case Ascii.u:
             try readHexEscape()
-        case asciir:
+        case Ascii.r:
             break
-        case asciib:
-            bytes.append(asciiBackspace)
-        case asciif:
-            bytes.append(asciiFormFeed)
+        case Ascii.b:
+            bytes.append(Ascii.backspace)
+        case Ascii.f:
+            bytes.append(Ascii.formFeed)
         default:
             throw JsonError.invalidEscapeSequence("\\\(Character(UnicodeScalar(c)))")
         }
@@ -257,12 +257,12 @@ public final class JsonInputStream {
             }
             
             switch c {
-            case asciiZero...asciiNine:
-                n = n * 16 + Int(c - asciiZero)
-            case asciia...asciif:
-                n = n * 16 + Int(c - asciia) + 10
-            case asciiA...asciiF:
-                n = n * 16 + Int(c - asciiA) + 10
+            case Ascii.zero...Ascii.nine:
+                n = n * 16 + Int(c - Ascii.zero)
+            case Ascii.a...Ascii.f:
+                n = n * 16 + Int(c - Ascii.a) + 10
+            case Ascii.A...Ascii.F:
+                n = n * 16 + Int(c - Ascii.A) + 10
             default:
                 throw JsonError.invalidEscapeSequence("Invalid hex character \(Character(UnicodeScalar(c)))")
             }
@@ -272,7 +272,7 @@ public final class JsonInputStream {
     }
         
     func isStartOfNumber(_ c: UInt8) -> Bool {
-        return (c >= asciiZero && c <= asciiNine) || c == asciiMinus
+        return (c >= Ascii.zero && c <= Ascii.nine) || c == Ascii.minus
     }
     
     func mustRead(_ s: String) throws {
@@ -291,7 +291,7 @@ public final class JsonInputStream {
             return
         }
         
-        if c != asciiComma {
+        if c != Ascii.comma {
             pos -= 1
         }
     }
@@ -335,7 +335,7 @@ public final class JsonInputStream {
     }
         
     func isWhitespace(_ c: UInt8) -> Bool {
-        return c == asciiSpace || c == asciiLf || c == asciiTab || c == asciiCr
+        return c == Ascii.space || c == Ascii.lf || c == Ascii.tab || c == Ascii.cr
     }
             
     func nextByte() throws -> UInt8? {
