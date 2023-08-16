@@ -22,28 +22,81 @@ SOFTWARE.
 
 import Foundation
 
-public enum JsonParseState {
-    case object
-    case array
-    case property(String)
-    case element(Int)
+public enum JsonInputError: Error {
+    case ioError(String)
+    case unexpectedInput(String)
+    case unexpectedEndOfInput
+    case stringTooLong
+    case invalidUTF8
+    case invalidEscapeSequence(String)
+    case invalidNumber(String)
+    case unexpected(String)
 }
 
-public enum JsonToken {
-    case startObject
-    case endObject
-    case startArray
-    case endArray
-    case startProperty(String)
-    case endProperty
-    case string(String)
-    case int(Int)
-    case double(Double)
-    case bool(Bool)
-    case null
+public enum JsonKey: CustomStringConvertible, Equatable {
+    case name(String)
+    case index(Int)
+    
+    public var description: String {
+        switch self {
+        case let .name(name):
+            return name
+        case let .index(index):
+            return "\(index)"
+        }
+    }
+    
+    public static func == (lhs: JsonKey, rhs: JsonKey) -> Bool {
+        switch (lhs, rhs) {
+        case let (.name(name1), .name(name2)):
+            return name1 == name2
+        case let (.index(index1), .index(index2)):
+            return index1 == index2
+        default:
+            return false
+        }
+    }
+}
+
+public enum JsonToken: Equatable {
+    case startObject(_ key: JsonKey?)
+    case endObject(_ key: JsonKey?)
+    case startArray(_ key: JsonKey?)
+    case endArray(_ key: JsonKey?)
+    case string(_ key: JsonKey?, _ value: String)
+    case number(_ key: JsonKey?, _ value: Double)
+    case bool(_ key: JsonKey?, _ value: Bool)
+    case null(_ key: JsonKey?)
+    
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case let (.startObject(key1), .startObject(key2)):
+            return key1 == key2
+        case let (.endObject(key1), .endObject(key2)):
+            return key1 == key2
+        case let (.startArray(key1), .startArray(key2)):
+            return key1 == key2
+        case let (.endArray(key1), .endArray(key2)):
+            return key1 == key2
+        case let (.string(key1, s1), .string(key2, s2)):
+            return s1 == s2 && key1 == key2
+        case let (.number(key1, n1), .number(key2, n2)):
+            return n1 == n2 && key1 == key2
+        case let (.bool(key1, b1), .bool(key2, b2)):
+            return b1 == b2 && key1 == key2
+        case let (.null(key1), .null(key2)):
+            return key1 == key2
+        default:
+            return false
+        }
+    }
 }
     
 public final class JsonInputStream {
+    enum ParseState {
+        case root, object(Int), array(Int)
+    }
+
     public static var bufferCapacity = 1024 * 4
     
     let stream: InputStream
@@ -54,18 +107,21 @@ public final class JsonInputStream {
     private var bytes = Data()
     private var pos = 0
     private var end = 0
+    private var arrayIndex = 0
     
-    public private(set) var context = [JsonParseState]()
+    var state = [ParseState.root]
+    public private(set) var path = [JsonKey]()
     
-    public init(path: String) throws {
-        guard let stream = InputStream(fileAtPath: path) else {
-            throw JsonError.ioError("Failed to open input stream for \(path)")
+    public init(filePath: String) throws {
+        guard let stream = InputStream(fileAtPath: filePath) else {
+            throw JsonInputError.ioError("Failed to open input stream for \(path)")
         }
         
         stream.open()
         
         self.stream = stream
         self.isOwningStream = true
+        self.stream.open()
     }
 
     public init(stream: InputStream) {
@@ -79,65 +135,142 @@ public final class JsonInputStream {
         }
         buf.deallocate()
     }
-    
-    public func read() throws -> JsonToken? {
-        if let c = try nextContentByte() {
-            switch c {
-            case Ascii.leftBrace:
-                context.append(.object)
-                return .startObject
-            case Ascii.rightBrace:
-                pop()
-                return .endObject
-            case Ascii.leftSquare:
-                context.append(.array)
-                return .startArray
-            case Ascii.rightSquare:
-                pop()
-                return .endArray
-            case Ascii.quote:
-                if case .some(.object) = context.last {
-                    let propertyName = try readPropertyStart()
-                    context.append(.property(propertyName))
-                    return .startProperty(propertyName)
-                } else if case .some(.property) = context.last {
-                    let stringValue = try readString()
-                    pop()
-                    try skipComma()
-                    return .string(stringValue)
-                } else if case .some(.array) = context.last {
-                    let stringValue = try readString()
-                    try skipComma()
-                    return .string(stringValue)
-                } else { // root level string
-                    return try .string(readString())
-                }
-            default:
-                if c == Ascii.n {
-                    try mustRead("ull")
-                    if case .some(.property) = context.last {
-                        pop()
-                    }
-                    return .null
-                } else if c == Ascii.t {
-                    try mustRead("rue")
-                    return .bool(true)
-                } else if c == Ascii.f {
-                    try mustRead("alse")
-                    return .bool(false)
-                } else {
-                    let d = try readDouble(c)
-                    if floor(d) == d {
-                        return .int(Int(d))
-                    }
-                    return .double(d)
-                }
+        
+    func read() throws -> JsonToken? {
+        guard var c = try nextContentByte() else {
+            guard case .root = state.last else {
+                throw JsonInputError.unexpectedEndOfInput
             }
-        } else {
             return nil
+        }
+        
+        switch state.last! {
+        case .object:
+            if c == Ascii.rightBrace {
+                guard case let .object(index) = try popState() else {
+                    throw JsonInputError.unexpected("Expected object parsing state")
+                }
+                if index >= 0 {
+                    popPath()
+                }
+                return .endObject(path.last)
+            }
+            
+            let nextIndex = try incrementObjectIndex()
+                        
+            if c == Ascii.comma {
+                guard nextIndex > 0 else {
+                    throw unexpectedInput(c, expected: "property")
+                }
+                popPath()
+                if let next = try nextContentByte() {
+                    c = next
+                } else {
+                    throw JsonInputError.unexpectedEndOfInput
+                }
+            } else if nextIndex != 0 {
+                throw unexpectedInput(c, expected: ",")
+            }
+            
+            guard c == Ascii.quote else {
+                throw unexpectedInput(c, expected: "\"")
+            }
+            
+            let key = try JsonKey.name(readPropertyStart())
+            path.append(key)
+            return try readValue(key)
+        case .array:
+            if c == Ascii.rightSquare {
+                guard case let .array(index) = try popState() else {
+                    throw JsonInputError.unexpected("Expected array parsing state")
+                }
+                if index >= 0 {
+                    popPath()
+                }
+                return .endArray(path.last)
+            }
+            
+            let nextIndex = try incrementArrayIndex()
+            
+            if c == Ascii.comma {
+                guard nextIndex > 0 else {
+                    throw unexpectedInput(c, expected: "array element")
+                }
+                guard case .index = popPath() else {
+                    throw JsonInputError.unexpected("Path not ending with array index")
+                }
+                if let next = try nextContentByte() {
+                    c = next
+                } else {
+                    throw JsonInputError.unexpectedEndOfInput
+                }
+            } else if nextIndex != 0 {
+                throw unexpectedInput(c, expected: ",")
+            }
+            
+            let key = JsonKey.index(nextIndex)
+            path.append(key)
+            pushback()
+            return try readValue(key)
+        case .root:
+            pushback()
+            return try readValue(nil)
         }
     }
     
+    func readValue(_ key: JsonKey?) throws -> JsonToken? {
+        guard let c = try nextContentByte() else {
+            return nil
+        }
+        
+        switch c {
+        case Ascii.quote:
+            let str = try readString()
+            return .string(key, str)
+        case Ascii.n:
+            try mustRead("ull")
+            return .null(key)
+        case Ascii.t:
+            try mustRead("rue")
+            return .bool(key, true)
+        case Ascii.f:
+            try mustRead("alse")
+            return .bool(key, false)
+        case Ascii.leftBrace:
+            pushState(.object(-1))
+            return .startObject(key)
+        case Ascii.leftSquare:
+            pushState(.array(-1))
+            return .startArray(key)
+        default:
+            if isStartOfNumber(c) {
+                return try .number(key, readDouble(c))
+            } else {
+                throw unexpectedInput(c)
+            }
+        }
+    }
+    
+    func incrementObjectIndex() throws -> Int {
+        guard case let .object(index) = try popState() else {
+            throw JsonInputError.unexpected("Expected object state")
+        }
+        
+        let newIndex = index + 1
+        pushState(.object(newIndex))
+        return newIndex
+    }
+    
+    func incrementArrayIndex() throws -> Int {
+        guard case let .array(index) = try popState() else {
+            throw JsonInputError.unexpected("Expected array state")
+        }
+        
+        let newIndex = index + 1
+        pushState(.array(newIndex))
+        return newIndex
+    }
+
     func readDouble(_ firstChar: UInt8) throws -> Double {
         var str = String(UnicodeScalar(firstChar))
         
@@ -150,16 +283,16 @@ public final class JsonInputStream {
             switch c {
             case Ascii.zero...Ascii.nine, Ascii.dot, Ascii.e, Ascii.E, Ascii.plus, Ascii.minus:
                 if str.utf8.count == maxStringLength {
-                    throw JsonError.stringTooLong
+                    throw JsonInputError.stringTooLong
                 }
                 str.append(Character(UnicodeScalar(c)))
             default:
-                throw JsonError.invalidNumber(str + String(UnicodeScalar(c)))
+                throw JsonInputError.invalidNumber(str + String(UnicodeScalar(c)))
             }
         }
         
         guard let d = Double(str) else {
-            throw JsonError.invalidNumber(str)
+            throw JsonInputError.invalidNumber(str)
         }
         return d
     }
@@ -168,11 +301,11 @@ public final class JsonInputStream {
         let propertyName = try readString()
         
         guard let c = try nextContentByte() else {
-            throw JsonError.unexpectedEndOfStream
+            throw JsonInputError.unexpectedEndOfInput
         }
         
         guard c == Ascii.colon else {
-            throw try unexpected(c, expected: ":")
+            throw unexpectedInput(c, expected: ":")
         }
 
         return propertyName
@@ -183,14 +316,14 @@ public final class JsonInputStream {
         
         while let c = try nextByte() {
             if bytes.count > maxStringLength {
-                throw JsonError.stringTooLong
+                throw JsonInputError.stringTooLong
             }
             
             if c == Ascii.backslash {
                 try readEscape()
             } else if c == Ascii.quote {
                 guard let s = String(data: bytes, encoding: .utf8) else {
-                    throw JsonError.invalidUTF8
+                    throw JsonInputError.invalidUTF8
                 }
                 return s
             } else {
@@ -198,12 +331,12 @@ public final class JsonInputStream {
             }
         }
         
-        throw JsonError.unexpectedEndOfStream
+        throw JsonInputError.unexpectedEndOfInput
     }
     
     func readEscape() throws {
         guard let c = try nextByte() else {
-            throw JsonError.unexpectedEndOfStream
+            throw JsonInputError.unexpectedEndOfInput
         }
         
         switch c {
@@ -222,7 +355,7 @@ public final class JsonInputStream {
         case Ascii.f:
             bytes.append(Ascii.formFeed)
         default:
-            throw JsonError.invalidEscapeSequence("\\\(Character(UnicodeScalar(c)))")
+            throw JsonInputError.invalidEscapeSequence("\\\(Character(UnicodeScalar(c)))")
         }
     }
     
@@ -230,12 +363,12 @@ public final class JsonInputStream {
         let n = try readHex()
         
         guard let u = UnicodeScalar(n) else {
-            throw JsonError.invalidEscapeSequence("Invalid unicode scalar \(n)")
+            throw JsonInputError.invalidEscapeSequence("Invalid unicode scalar \(n)")
         }
         
         let ch = Character(u)
         if bytes.count + ch.utf8.count > maxStringLength {
-            throw JsonError.stringTooLong
+            throw JsonInputError.stringTooLong
         }
         
         let appended = ch.utf8.withContiguousStorageIfAvailable { buf in
@@ -253,7 +386,7 @@ public final class JsonInputStream {
         
         for _ in 0..<4 {
             guard let c = try nextByte() else {
-                throw JsonError.unexpectedEndOfStream
+                throw JsonInputError.unexpectedEndOfInput
             }
             
             switch c {
@@ -264,7 +397,7 @@ public final class JsonInputStream {
             case Ascii.A...Ascii.F:
                 n = n * 16 + Int(c - Ascii.A) + 10
             default:
-                throw JsonError.invalidEscapeSequence("Invalid hex character \(Character(UnicodeScalar(c)))")
+                throw JsonInputError.invalidEscapeSequence("Invalid hex character \(Character(UnicodeScalar(c)))")
             }
         }
 
@@ -278,50 +411,54 @@ public final class JsonInputStream {
     func mustRead(_ s: String) throws {
         for expected in s.utf8 {
             guard let c = try nextByte() else {
-                throw JsonError.unexpectedEndOfStream
+                throw JsonInputError.unexpectedEndOfInput
             }
             guard c == expected else {
-                throw try unexpected(c, expected: String(UnicodeScalar(expected)))
+                throw unexpectedInput(c, expected: String(UnicodeScalar(expected)))
             }
         }
     }
+
+    func pushState(_ newState: ParseState) {
+        state.append(newState)
+    }
     
-    func skipComma() throws {
-        guard let c = try nextContentByte() else {
-            return
+    @discardableResult
+    func popState() throws -> ParseState {
+        if state.count < 2 {
+            throw JsonInputError.unexpected("Attempt to pop root state. This is never valid")
         }
-        
-        if c != Ascii.comma {
-            pos -= 1
-        }
+        return state.popLast()!
     }
-        
-    func pop() {
-        _ = context.popLast()
+    
+    @discardableResult
+    func popPath() -> JsonKey? {
+        return path.popLast()
     }
-                
-    func unexpected(_ c: UInt8, expected: String? = nil) throws -> JsonError {
-        var message = try String(UnicodeScalar(c)) + readRaw(20)
+    
+    func unexpectedInput(_ c: UInt8, expected: String? = nil) -> JsonInputError {
+        var message = ""
         if let expected = expected {
-            message.append(". Expected \(expected)")
+            message += "Expected \(expected) but got "
         }
-        return JsonError.unexpectedContent(message)
+        message += "\(UnicodeScalar(c))\(readRaw(20))"
+        return JsonInputError.unexpectedInput(message)
     }
     
-    func readRaw(_ count: Int) throws -> String {
-        var s = try readRawAvailable(count)
+    func readRaw(_ count: Int) -> String {
+        var s = readRawAvailable(count)
         if s.utf8.count < count {
-            if try readStream() {
-                try s.append(readRawAvailable(count - s.utf8.count))
+            if let _ = try? readStream() {
+                s.append(readRawAvailable(count - s.utf8.count))
             }
         }
                 
         return s
     }
     
-    func readRawAvailable(_ count: Int) throws -> String {
+    func readRawAvailable(_ count: Int) -> String {
         let n = min(count, end - pos)
-        if n == 0 {
+        if n < 1 {
             return ""
         }
         
@@ -348,9 +485,18 @@ public final class JsonInputStream {
         
         let c = buf[pos]
         pos += 1
+        
+        if c == 0 {
+            return nil
+        }
+        
         return c
     }
     
+    func pushback() {
+        pos -= 1
+    }
+        
     func nextContentByte() throws -> UInt8? {
         while let c = try nextByte() {
             if !isWhitespace(c) {
@@ -369,11 +515,12 @@ public final class JsonInputStream {
     func readStream() throws -> Bool {
         let res = stream.read(buf.baseAddress!, maxLength: Self.bufferCapacity)
         guard res > -1 else {
-            throw stream.streamError ?? JsonError.ioError("Stream error")
+            throw stream.streamError ?? JsonInputError.ioError("Stream error")
         }
         
         end = res
+        pos = 0
         
-        return end - pos > 0
+        return end > 0
     }
 }

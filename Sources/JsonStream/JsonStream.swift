@@ -22,17 +22,6 @@ SOFTWARE.
 
 import Foundation
 
-public enum JsonError: Error {
-    case invalidContext(String)
-    case ioError(String)
-    case unexpectedContent(String)
-    case unexpectedEndOfStream
-    case stringTooLong
-    case invalidUTF8
-    case invalidEscapeSequence(String)
-    case invalidNumber(String)
-}
-
 public struct Ascii {
     static let quote = Character("\"").asciiValue!
     static let backslash = Character("\\").asciiValue!

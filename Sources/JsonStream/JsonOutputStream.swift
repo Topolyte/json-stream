@@ -29,6 +29,11 @@ enum JsonContext {
     case primitive
 }
 
+public enum JsonOutputError: Error {
+    case ioError(String)
+    case invalidContext(String)
+}
+
 public class JsonOutputStream {
     var out: OutputStream
     let isOwningStream: Bool
@@ -37,7 +42,7 @@ public class JsonOutputStream {
         
     public init(path: String) throws {
         guard let stream = OutputStream(toFileAtPath: path, append: false) else {
-            throw JsonError.ioError("Failed to open output stream for \(path)")
+            throw JsonOutputError.ioError("Failed to open output stream for \(path)")
         }
         stream.open()
         self.out = stream
@@ -49,6 +54,10 @@ public class JsonOutputStream {
         self.out = stream
         self.isOwningStream = false
         self.context = .root
+        
+        if self.out.streamStatus == .notOpen {
+            self.out.open()
+        }
     }
     
     init(stream: OutputStream, context: JsonContext) {
@@ -209,7 +218,7 @@ public class JsonOutputStream {
         func writeContiguous(_ str: inout String) throws -> Bool {
             let count = try str.utf8.withContiguousStorageIfAvailable { buf in
                 guard let p = buf.baseAddress else {
-                    throw JsonError.ioError("String buffer is nil")
+                    throw JsonOutputError.ioError("String buffer is nil")
                 }
                 
                 let res = out.write(p, maxLength: buf.count)
@@ -219,11 +228,11 @@ public class JsonOutputStream {
                 }
                 
                 if res == 0 {
-                    throw JsonError.ioError("Buffer capacity reached")
+                    throw JsonOutputError.ioError("Buffer capacity reached")
                 }
                 
                 throw out.streamError ??
-                    JsonError.ioError(
+                    JsonOutputError.ioError(
                         "OutputStream.write() failed. streamStatus: \(out.streamStatus)")
             }
             
@@ -233,7 +242,7 @@ public class JsonOutputStream {
         if try !writeContiguous(&str) {
             str.makeContiguousUTF8()
             guard try writeContiguous(&str) else {
-                throw JsonError.ioError("Failed to write \(str) as contiguous UTF-8")
+                throw JsonOutputError.ioError("Failed to write \(str) as contiguous UTF-8")
             }
         }
     }
@@ -271,7 +280,7 @@ public class JsonOutputStream {
     
     fileprivate func requireContext(for itemType: String, _ validContexts: JsonContext...) throws {
         if !validContexts.contains(context) {
-            throw JsonError.invalidContext("\(itemType) not valid in \(context) context")
+            throw JsonOutputError.invalidContext("\(itemType) not valid in \(context) context")
         }
     }
     
