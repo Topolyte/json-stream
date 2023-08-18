@@ -14,7 +14,7 @@ final class JsonInputStreamTests: XCTestCase {
         {
             "type": "Captain",
             "name": "Jean-Luc Picard",
-            "speed": {"quantity": 500000.5, "unit": "m/s"},
+            "speed": {"quantity": 500.5e3, "unit": "m/s"},
             "isFrench": true,
             "height": null,
             "postings": ["USS-Enterprise-D", 2363, "USS-Enterprise-E", 2372],
@@ -28,7 +28,7 @@ final class JsonInputStreamTests: XCTestCase {
             .string(.name("type"), "Captain"),
             .string(.name("name"), "Jean-Luc Picard"),
             .startObject(.name("speed")),
-            .number(.name("quantity"), 500000.5),
+            .number(.name("quantity"), 500500.0),
             .string(.name("unit"), "m/s"),
             .endObject(.name("speed")),
             .bool(.name("isFrench"), true),
@@ -48,6 +48,45 @@ final class JsonInputStreamTests: XCTestCase {
         }
 
         XCTAssertEqual(try jis.read(), nil)
+    }
+    
+    func testNumber() throws {
+        let valid = [
+            ("1", 1.0),
+            ("0", 0.0),
+            ("1.23", 1.23),
+            ("-11.234", -11.234),
+            ("0.2233", 0.2233),
+            ("12.40", 12.4),
+            ("01.10", 1.1),
+            ("-0.0", 0.0),
+            ("1.23e+14", 1.23e14),
+            ("1.23e-4", 1.23e-4),
+            ("11e4", 110000.0)
+        ]
+        
+        let invalid = [
+            ".1", "--1.2", "12,345.6", "12.34.56", "12 345", "12_345",
+            "1.2a4", "0xABC", "1.2 e4", "12-e4", "12."
+        ]
+        
+        for (s, n) in valid {
+            let jis = makeStream(s)
+            XCTAssertEqual(try jis.read(), .number(nil, n))
+        }
+        
+        for s in invalid {
+            let jis = makeStream(s)
+            XCTAssertThrowsError(try consumeTokens(jis))
+        }
+    }
+    
+    func testAdhoc() throws {
+        let s = "11e-04"
+        let jis = makeStream(s)
+        let tok = try jis.read()
+        
+        print(tok)
     }
     
     func testNestedEmptyArrays() throws {
@@ -181,18 +220,23 @@ final class JsonInputStreamTests: XCTestCase {
         
         XCTAssertEqual(str, expected)
         XCTAssertNil(key)
-        
         XCTAssertNil(try jis.read())
     }
     
     func testInvalidStringEscaping() throws {
-        var s = #""\u20azzz""#
-        var jis = makeStream(s)
+        let s = #""\u20azzz""#
+        let jis = makeStream(s)
         XCTAssertThrowsError(try jis.read()) { err in
             print(err)
         }
     }
     
+    func testEmptyString() throws {
+        let s = ""
+        let jis = makeStream(s)
+        XCTAssertEqual(try jis.read(), nil)
+    }
+        
     func consumeTokens(_ jis: JsonInputStream, printTokens: Bool = false) throws {
         while let token = try jis.read() {
             if printTokens {

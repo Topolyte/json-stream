@@ -78,12 +78,12 @@ public enum JsonToken: Equatable {
             return key1 == key2
         case let (.endArray(key1), .endArray(key2)):
             return key1 == key2
-        case let (.string(key1, s1), .string(key2, s2)):
-            return s1 == s2 && key1 == key2
-        case let (.number(key1, n1), .number(key2, n2)):
-            return n1 == n2 && key1 == key2
-        case let (.bool(key1, b1), .bool(key2, b2)):
-            return b1 == b2 && key1 == key2
+        case let (.string(key1, val1), .string(key2, val2)):
+            return key1 == key2 && val1 == val2
+        case let (.number(key1, val1), .number(key2, val2)):
+            return key1 == key2 && val1 == val2
+        case let (.bool(key1, val1), .bool(key2, val2)):
+            return key1 == key2 && val1 == val2
         case let (.null(key1), .null(key2)):
             return key1 == key2
         default:
@@ -101,7 +101,7 @@ public final class JsonInputStream {
     
     let stream: InputStream
     let isOwningStream: Bool
-    public var maxStringLength = 1024 * 1024 * 10
+    public var maxStringLength = Int.max
     
     private let buf = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: bufferCapacity)
     private var bytes = Data()
@@ -121,7 +121,6 @@ public final class JsonInputStream {
         
         self.stream = stream
         self.isOwningStream = true
-        self.stream.open()
     }
 
     public init(stream: InputStream) {
@@ -136,7 +135,7 @@ public final class JsonInputStream {
         buf.deallocate()
     }
         
-    func read() throws -> JsonToken? {
+    public func read() throws -> JsonToken? {
         guard var c = try nextContentByte() else {
             guard case .root = state.last else {
                 throw JsonInputError.unexpectedEndOfInput
@@ -176,7 +175,7 @@ public final class JsonInputStream {
                 throw unexpectedInput(c, expected: "\"")
             }
             
-            let key = try JsonKey.name(readPropertyStart())
+            let key = try JsonKey.name(readPropertyName())
             path.append(key)
             return try readValue(key)
         case .array:
@@ -214,7 +213,17 @@ public final class JsonInputStream {
             return try readValue(key)
         case .root:
             pushback()
-            return try readValue(nil)
+            let token = try readValue(nil)
+            switch token {
+            case .startObject, .startArray:
+                return token
+            default:
+                let next = try nextContentByte()
+                guard next == nil else {
+                    throw unexpectedInput(next!)
+                }
+                return token
+            }
         }
     }
     
@@ -244,7 +253,8 @@ public final class JsonInputStream {
             return .startArray(key)
         default:
             if isStartOfNumber(c) {
-                return try .number(key, readDouble(c))
+                pushback()
+                return try .number(key, readDouble())
             } else {
                 throw unexpectedInput(c)
             }
@@ -270,34 +280,103 @@ public final class JsonInputStream {
         pushState(.array(newIndex))
         return newIndex
     }
-
-    func readDouble(_ firstChar: UInt8) throws -> Double {
-        var str = String(UnicodeScalar(firstChar))
+    
+    func readDouble() throws -> Double {
+        var d: Double
         
-        while let c = try nextByte() {
-            if isWhitespace(c) || c == Ascii.comma || c == Ascii.rightBrace || c == Ascii.rightSquare {
-                pos -= 1
-                break
+        guard let n = try readInt() else {
+            throw JsonInputError.unexpectedEndOfInput
+        }
+        
+        d = Double(n)
+                
+        guard var c = try nextByte() else {
+            return d
+        }
+        
+        if c == Ascii.dot {
+            guard let n = try readInt(signed: false) else {
+                throw JsonInputError.unexpectedEndOfInput
             }
             
-            switch c {
-            case Ascii.zero...Ascii.nine, Ascii.dot, Ascii.e, Ascii.E, Ascii.plus, Ascii.minus:
-                if str.utf8.count == maxStringLength {
-                    throw JsonInputError.stringTooLong
+            if n > 0 {
+                let nDouble = Double(n)
+                let digits = floor(log10(nDouble)) + 1
+                let frac = nDouble * pow(10.0, digits * -1)
+                
+                if d >= 0 {
+                    d += frac
+                } else {
+                    d -= frac
                 }
-                str.append(Character(UnicodeScalar(c)))
-            default:
-                throw JsonInputError.invalidNumber(str + String(UnicodeScalar(c)))
             }
+
+            guard let next = try nextByte() else {
+                return d
+            }
+            
+            c = next
+        }
+                
+        if c == Ascii.e || c == Ascii.E {
+            guard let n = try readInt() else {
+                throw unexpectedInput(c, expected: "number")
+            }
+            
+            d *= pow(10.0, Double(n))
+        } else {
+            pushback()
         }
         
-        guard let d = Double(str) else {
-            throw JsonInputError.invalidNumber(str)
-        }
         return d
     }
     
-    func readPropertyStart() throws -> String {
+    func readInt(signed: Bool = true) throws -> Int? {
+        var n: Int
+        var sign = 1
+        
+        guard var c = try nextByte() else {
+            return nil
+        }
+        
+        if c == Ascii.minus || c == Ascii.plus {
+            if c == Ascii.minus {
+                if !signed {
+                    throw unexpectedInput(c, expected: "digits")
+                }
+                sign = -1
+            }
+         
+            guard let next = try nextByte() else {
+                throw JsonInputError.unexpectedEndOfInput
+            }
+            
+            c = next
+        }
+        
+        guard isDigit(c) else {
+            throw unexpectedInput(c, expected: "number")
+        }
+        
+        n = Int(c - Ascii.zero)
+        
+        while let c = try nextByte() {
+            if isDigit(c) {
+                n = n * 10 + Int(c - Ascii.zero)
+            } else {
+                pushback()
+                break
+            }
+        }
+        
+        return n * sign
+    }
+    
+    func isDigit(_ c: UInt8) -> Bool {
+        Ascii.zero...Ascii.nine ~= c
+    }
+    
+    func readPropertyName() throws -> String {
         let propertyName = try readString()
         
         guard let c = try nextContentByte() else {
