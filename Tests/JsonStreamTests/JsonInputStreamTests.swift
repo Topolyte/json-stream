@@ -62,7 +62,9 @@ final class JsonInputStreamTests: XCTestCase {
             ("-0.0", 0.0),
             ("1.23e+14", 1.23e14),
             ("1.23e-4", 1.23e-4),
-            ("11e4", 110000.0)
+            ("11e4", 110000.0),
+            ("-12345678901234567890123456789.123", -12345678901234567890123456789.123),
+            ("1234567890123456789", 1234567890123456789.0)
         ]
         
         let invalid = [
@@ -81,13 +83,13 @@ final class JsonInputStreamTests: XCTestCase {
         }
     }
     
-    func testAdhoc() throws {
-        let s = "11e-04"
-        let jis = makeStream(s)
-        let tok = try jis.read()
-        
-        print(tok)
-    }
+//    func testAdhoc() throws {
+//        let s = "11e-04"
+//        let jis = makeStream(s)
+//        let tok = try jis.read()
+//
+//        print(tok)
+//    }
     
     func testNestedEmptyArrays() throws {
         let s = """
@@ -235,6 +237,16 @@ final class JsonInputStreamTests: XCTestCase {
         let s = ""
         let jis = makeStream(s)
         XCTAssertEqual(try jis.read(), nil)
+    }
+    
+    func testStringTooLong() throws {
+        let s = "\"abcdefgh\u{20ac}ijklmnopqrstuvwxyz\""
+        let jis = makeStream(s)
+        jis.maxStringLength = 10
+        
+        XCTAssertThrowsError(try jis.read()) { err in
+            print(err)
+        }
     }
         
     func consumeTokens(_ jis: JsonInputStream, printTokens: Bool = false) throws {
