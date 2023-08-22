@@ -1,12 +1,6 @@
 import XCTest
 @testable import JsonStream
 
-// XCTest Documenation
-// https://developer.apple.com/documentation/xctest
-
-// Defining Test Cases and Test Methods
-// https://developer.apple.com/documentation/xctest/defining_test_cases_and_test_methods
-
 final class JsonInputStreamTests: XCTestCase {
     
     func testBasics() throws {
@@ -247,6 +241,33 @@ final class JsonInputStreamTests: XCTestCase {
         XCTAssertThrowsError(try jis.read()) { err in
             print(err)
         }
+    }
+    
+    func testBuffering() throws {
+        let s = """
+        {
+            "key1": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            "key2": "0123456789012345678901234567890123456789012345678901"
+        }
+        """
+        
+        let oldCapacity = JsonInputStream.bufferCapacity
+        JsonInputStream.bufferCapacity = 20
+        let jis = makeStream(s)
+        
+        let expected: [JsonToken] = [
+            .startObject(nil),
+            .string(.name("key1"), "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            .string(.name("key2"), "0123456789012345678901234567890123456789012345678901"),
+            .endObject(nil)
+        ]
+        
+        for token in expected {
+            XCTAssertEqual(try jis.read(), token)
+        }
+        
+        XCTAssertEqual(try jis.read(), nil)
+        JsonInputStream.bufferCapacity = oldCapacity
     }
         
     func consumeTokens(_ jis: JsonInputStream, printTokens: Bool = false) throws {
