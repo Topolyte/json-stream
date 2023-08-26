@@ -22,7 +22,7 @@ SOFTWARE.
 
 import Foundation
 
-public struct Ascii {
+struct Ascii {
     static let quote = Character("\"").asciiValue!
     static let backslash = Character("\\").asciiValue!
     static let slash = Character("/").asciiValue!
