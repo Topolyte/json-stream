@@ -76,15 +76,7 @@ final class JsonInputStreamTests: XCTestCase {
             XCTAssertThrowsError(try consumeTokens(jis))
         }
     }
-    
-//    func testAdhoc() throws {
-//        let s = "11e-04"
-//        let jis = makeStream(s)
-//        let tok = try jis.read()
-//
-//        print(tok)
-//    }
-    
+        
     func testNestedEmptyArrays() throws {
         let s = """
         [[]]
