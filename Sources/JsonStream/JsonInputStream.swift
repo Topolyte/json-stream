@@ -111,43 +111,44 @@ public final class JsonInputStream {
     }
 
     public static let defaultBufferCapacity = 1024 * 1024
+    public static let defaultMaxStringLength = 1024 * 1024 * 10
     
     public private(set) var line = 1
-    public var maxStringLength = 1024 * 1024 * 1024
-    public private(set) var path = [JsonKey]()
+    public private(set) var keyPath = [JsonKey]()
     
     let stream: InputStream
     let isOwningStream: Bool
     let buf: UnsafeMutableBufferPointer<UInt8>
     let bufferCapacity: Int
+    let maxStringLength: Int
 
     var strbuf = Data()
     var pos = 0
     var end = 0
     var arrayIndex = 0
     var state = [ParseState.root]
-    
-    public init(filePath: String, bufferCapacity: Int?) throws {
-        guard let istr = InputStream(fileAtPath: filePath) else {
-            throw JsonInputError(kind: .ioError, line: 0, message: "Failed to open \(path)")
-        }
 
-        self.stream = istr
-        self.stream.open()
-        self.isOwningStream = true
+    public init(stream: InputStream, isOwningStream: Bool = true,
+                bufferCapacity: Int? = nil, maxStringLength: Int? = nil) throws {
+        
+        self.stream = stream
+        self.isOwningStream = isOwningStream
         self.bufferCapacity = bufferCapacity ?? Self.defaultBufferCapacity
         self.buf = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: self.bufferCapacity)
-
+        self.maxStringLength = maxStringLength ?? Self.defaultMaxStringLength
+        
         try checkStreamStatus()
     }
 
-    public init(stream: InputStream, bufferCapacity: Int?) throws {
-        self.stream = stream
-        self.isOwningStream = false
-        self.bufferCapacity = bufferCapacity ?? Self.defaultBufferCapacity
-        self.buf = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: self.bufferCapacity)
+    public convenience init(filePath: String, bufferCapacity: Int? = nil,
+                            maxStringLength: Int? = nil) throws {
         
-        try checkStreamStatus()
+        guard let istr = InputStream(fileAtPath: filePath) else {
+            throw JsonInputError(kind: .ioError, line: 1, message: "Failed to open \(filePath)")
+        }
+
+        istr.open()
+        try self.init(stream: istr, isOwningStream: true)
     }
     
     deinit {
@@ -155,6 +156,24 @@ public final class JsonInputStream {
             stream.close()
         }
         buf.deallocate()
+    }
+    
+    public var keyPathString: String {
+        var res = ""
+        
+        for key in keyPath {
+            switch key {
+            case .index(let i):
+                res.append("[\(i)]")
+            case .name(let name):
+                if !res.isEmpty {
+                    res.append(".")
+                }
+                res.append(name)
+            }
+        }
+        
+        return res
     }
         
     public func read() throws -> JsonToken? {
@@ -174,7 +193,7 @@ public final class JsonInputStream {
                 if index >= 0 {
                     popPath()
                 }
-                return .endObject(path.last)
+                return .endObject(keyPath.last)
             }
             
             let nextIndex = try incrementObjectIndex()
@@ -198,7 +217,7 @@ public final class JsonInputStream {
             }
             
             let key = try JsonKey.name(readPropertyName())
-            path.append(key)
+            keyPath.append(key)
             return try readValue(key)
         case .array:
             if c == Ascii.rightSquare {
@@ -208,7 +227,7 @@ public final class JsonInputStream {
                 if index >= 0 {
                     popPath()
                 }
-                return .endArray(path.last)
+                return .endArray(keyPath.last)
             }
             
             let nextIndex = try incrementArrayIndex()
@@ -230,7 +249,7 @@ public final class JsonInputStream {
             }
             
             let key = JsonKey.index(nextIndex)
-            path.append(key)
+            keyPath.append(key)
             pushback()
             return try readValue(key)
         case .root:
@@ -581,7 +600,7 @@ public final class JsonInputStream {
     
     @discardableResult
     func popPath() -> JsonKey? {
-        return path.popLast()
+        return keyPath.popLast()
     }
         
     func readRaw(_ count: Int) -> String {

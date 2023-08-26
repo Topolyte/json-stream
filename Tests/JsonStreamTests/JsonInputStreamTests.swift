@@ -227,8 +227,7 @@ final class JsonInputStreamTests: XCTestCase {
     
     func testStringTooLong() throws {
         let s = "\"abcdefgh\u{20ac}ijklmnopqrstuvwxyz\""
-        let jis = try makeStream(s)
-        jis.maxStringLength = 10
+        let jis = try makeStream(s, maxStringLength: 10)
         
         XCTAssertThrowsError(try jis.read()) { err in
             print(err)
@@ -258,6 +257,44 @@ final class JsonInputStreamTests: XCTestCase {
         
         XCTAssertEqual(try jis.read(), nil)
     }
+    
+    func testKeyPathString() throws {
+        let s = """
+        {
+            "starship": {
+                "type": "research vessel",
+                "features": [
+                    {
+                        "sensors": [
+                            "subspace sensor",
+                            "camera",
+                            "light sensor"
+                        ]
+                    },
+                    "deflector shield"
+                ]
+            }
+        }
+        """
+        
+        let jis = try makeStream(s)
+        var cameraPath = ""
+        var typePath = ""
+        
+        while let token = try jis.read() {
+            switch token {
+            case .string(.index(1), "camera"):
+                cameraPath = jis.keyPathString
+            case .string(.name("type"), "research vessel"):
+                typePath = jis.keyPathString
+            default:
+                break
+            }
+        }
+        
+        XCTAssertEqual(cameraPath, "starship.features[0].sensors[1]")
+        XCTAssertEqual(typePath, "starship.type")
+    }
         
     func consumeTokens(_ jis: JsonInputStream, printTokens: Bool = false) throws {
         while let token = try jis.read() {
@@ -267,10 +304,12 @@ final class JsonInputStreamTests: XCTestCase {
         }
     }
     
-    func makeStream(_ s: String, bufferCapacity: Int? = nil) throws -> JsonInputStream {
+    func makeStream(_ s: String, bufferCapacity: Int? = nil, maxStringLength: Int? = nil) throws -> JsonInputStream {
         let stream = InputStream(data: s.data(using: .utf8)!)
         stream.open()
-        return try JsonInputStream(stream: stream, bufferCapacity: bufferCapacity)
+        
+        return try JsonInputStream(
+            stream: stream, bufferCapacity: bufferCapacity, maxStringLength: maxStringLength)
     }
 }
 
