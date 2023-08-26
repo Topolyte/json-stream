@@ -684,21 +684,7 @@ public final class JsonInputStream {
                 message: "Unexpected stream status: \(statusDescription(stream.streamStatus))")
         }
     }
-    
-    func statusDescription(_ status: Stream.Status) -> String {
-        switch status {
-        case .atEnd: return "atEnd"
-        case .closed: return "closed"
-        case .error: return "error"
-        case .notOpen: return "notOpen"
-        case .open: return "open"
-        case .opening: return "opening"
-        case .reading: return "reading"
-        case .writing: return "writing"
-        default: return "unknown"
-        }
-    }
-    
+        
     func err(_ kind: JsonInputError.ErrorKind, _ message: String? = nil) -> JsonInputError {
         JsonInputError(kind: kind, line: line, message: message)
     }

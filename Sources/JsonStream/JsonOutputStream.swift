@@ -22,6 +22,11 @@ SOFTWARE.
 
 import Foundation
 
+public enum JsonOutputError: Error {
+    case ioError(String)
+    case invalidContext(String)
+}
+
 enum JsonContext {
     case root
     case object
@@ -29,46 +34,45 @@ enum JsonContext {
     case primitive
 }
 
-public enum JsonOutputError: Error {
-    case ioError(String)
-    case invalidContext(String)
-}
-
 public class JsonOutputStream {
-    var out: OutputStream
-    let isOwningStream: Bool
     public var index: Int = -1
+    
+    var stream: OutputStream
+    let isOwningStream: Bool
     let context: JsonContext
         
     public init(path: String) throws {
         guard let stream = OutputStream(toFileAtPath: path, append: false) else {
             throw JsonOutputError.ioError("Failed to open output stream for \(path)")
         }
-        stream.open()
-        self.out = stream
+        
+        self.stream = stream
         self.isOwningStream = true
         self.context = .root
+        
+        stream.open()
+        try checkStreamStatus()
     }
     
     public init(stream: OutputStream) {
-        self.out = stream
+        self.stream = stream
         self.isOwningStream = false
         self.context = .root
         
-        if self.out.streamStatus == .notOpen {
-            self.out.open()
+        if self.stream.streamStatus == .notOpen {
+            self.stream.open()
         }
     }
     
     init(stream: OutputStream, context: JsonContext) {
-        self.out = stream
+        self.stream = stream
         self.isOwningStream = false
         self.context = context
     }
     
     deinit {
         if isOwningStream {
-            out.close()
+            stream.close()
         }
     }
         
@@ -76,7 +80,7 @@ public class JsonOutputStream {
         try requireValueContext()
         try nextItem()
         try writeRaw("{")
-        let jos = JsonOutputStream(stream: out, context: .object)
+        let jos = JsonOutputStream(stream: stream, context: .object)
         try f(jos)
         try writeRaw("}")
     }
@@ -86,7 +90,7 @@ public class JsonOutputStream {
         try nextItem()
         try writeKey(name)
         try writeRaw("{")
-        let jos = JsonOutputStream(stream: out, context: .object)
+        let jos = JsonOutputStream(stream: stream, context: .object)
         try f(jos)
         try writeRaw("}")
     }
@@ -95,7 +99,7 @@ public class JsonOutputStream {
         try requireValueContext()
         try nextItem()
         try writeRaw("[")
-        let jos = JsonOutputStream(stream: out, context: .array)
+        let jos = JsonOutputStream(stream: stream, context: .array)
         try f(jos)
         try writeRaw("]")
     }
@@ -105,7 +109,7 @@ public class JsonOutputStream {
         try nextItem()
         try writeKey(name)
         try writeRaw("[")
-        let jos = JsonOutputStream(stream: out, context: .array)
+        let jos = JsonOutputStream(stream: stream, context: .array)
         try f(jos)
         try writeRaw("]")
     }
@@ -166,7 +170,7 @@ public class JsonOutputStream {
         try writeRaw("\n")
     }
 
-    fileprivate func nextItem() throws {
+    func nextItem() throws {
         if context == .array || context == .object {
             index += 1
             if index > 0 {
@@ -175,12 +179,12 @@ public class JsonOutputStream {
         }
     }
     
-    fileprivate func writeKey(_ name: String) throws {
+    func writeKey(_ name: String) throws {
         try writeValue(name)
         try writeRaw(":")
     }
     
-    fileprivate func writeValue(_ value: String) throws {
+    func writeValue(_ value: String) throws {
         try writeRaw("\"")
         
         if value.utf8.contains(where: {
@@ -196,11 +200,11 @@ public class JsonOutputStream {
         try writeRaw("\"")
     }
 
-    fileprivate func writeValue<T: Numeric>(_ n: T) throws {
+    func writeValue<T: Numeric>(_ n: T) throws {
         try writeRaw(String(describing: n))
     }
     
-    fileprivate func writeValue(_ b: Bool) throws {
+    func writeValue(_ b: Bool) throws {
         if b {
             try writeRaw("true")
         } else {
@@ -208,11 +212,11 @@ public class JsonOutputStream {
         }
     }
     
-    fileprivate func writeNullValue() throws {
+    func writeNullValue() throws {
         try writeRaw("null")
     }
         
-    fileprivate func writeRaw(_ s: String) throws {
+    func writeRaw(_ s: String) throws {
         var str = s
         
         func writeContiguous(_ str: inout String) throws -> Bool {
@@ -221,7 +225,7 @@ public class JsonOutputStream {
                     throw JsonOutputError.ioError("String buffer is nil")
                 }
                 
-                let res = out.write(p, maxLength: buf.count)
+                let res = stream.write(p, maxLength: buf.count)
                 
                 if res > 0 {
                     return res
@@ -231,9 +235,9 @@ public class JsonOutputStream {
                     throw JsonOutputError.ioError("Buffer capacity reached")
                 }
                 
-                throw out.streamError ??
+                throw stream.streamError ??
                     JsonOutputError.ioError(
-                        "OutputStream.write() failed. streamStatus: \(out.streamStatus)")
+                        "OutputStream.write() failed. streamStatus: \(stream.streamStatus)")
             }
             
             return count != nil
@@ -247,7 +251,7 @@ public class JsonOutputStream {
         }
     }
     
-    fileprivate func escape(_ s: String) -> String {
+    func escape(_ s: String) -> String {
         var result = ""
         
         for c in s {
@@ -278,19 +282,31 @@ public class JsonOutputStream {
         return result
     }
     
-    fileprivate func requireContext(for itemType: String, _ validContexts: JsonContext...) throws {
+    func requireContext(for itemType: String, _ validContexts: JsonContext...) throws {
         if !validContexts.contains(context) {
             throw JsonOutputError.invalidContext("\(itemType) not valid in \(context) context")
         }
     }
     
-    fileprivate func requirePropertyContext() throws {
+    func requirePropertyContext() throws {
         try requireContext(for: "property", .object)
     }
     
-    fileprivate func requireValueContext() throws {
+    func requireValueContext() throws {
         try requireContext(for: "value", .root, .array)
     }
+    
+    func checkStreamStatus() throws {
+        if let error = stream.streamError {
+            throw JsonOutputError.ioError("\(error)")
+        }
+        
+        if stream.streamStatus != .open && stream.streamStatus != .atEnd {
+            throw JsonOutputError.ioError(
+                "Unexpected stream status: \(statusDescription(stream.streamStatus))")
+        }
+    }
+
 }
 
 

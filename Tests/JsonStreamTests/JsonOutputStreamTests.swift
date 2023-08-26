@@ -1,12 +1,6 @@
 import XCTest
 @testable import JsonStream
 
-// XCTest Documenation
-// https://developer.apple.com/documentation/xctest
-
-// Defining Test Cases and Test Methods
-// https://developer.apple.com/documentation/xctest/defining_test_cases_and_test_methods
-
 final class JsonOutputStreamTests: XCTestCase {
 
     func testRootLiterals() throws {
@@ -95,7 +89,7 @@ final class JsonOutputStreamTests: XCTestCase {
     }
     
     func toString(_ stream: JsonOutputStream) -> String {
-        if let data = stream.out.property(forKey: .dataWrittenToMemoryStreamKey) as? Data {
+        if let data = stream.stream.property(forKey: .dataWrittenToMemoryStreamKey) as? Data {
             return String(data: data, encoding: .utf8)!
         }
         return "Error: Not a memory stream"

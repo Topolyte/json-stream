@@ -15,7 +15,7 @@ final class JsonInputStreamTests: XCTestCase {
             "boldness": 101
         }
         """
-        let jis = makeStream(s)
+        let jis = try makeStream(s)
         
         let expected: [JsonToken] = [
             .startObject(nil),
@@ -67,12 +67,12 @@ final class JsonInputStreamTests: XCTestCase {
         ]
         
         for (s, n) in valid {
-            let jis = makeStream(s)
+            let jis = try makeStream(s)
             XCTAssertEqual(try jis.read(), .number(nil, n))
         }
         
         for s in invalid {
-            let jis = makeStream(s)
+            let jis = try makeStream(s)
             XCTAssertThrowsError(try consumeTokens(jis))
         }
     }
@@ -82,7 +82,7 @@ final class JsonInputStreamTests: XCTestCase {
         [[]]
         """
         
-        let jis = makeStream(s)
+        let jis = try makeStream(s)
         
         let expected: [JsonToken] = [
             .startArray(nil),
@@ -104,7 +104,7 @@ final class JsonInputStreamTests: XCTestCase {
         [{},{}]
         """
         
-        var jis = makeStream(s)
+        var jis = try makeStream(s)
         
         var expected: [JsonToken] = [
             .startArray(nil),
@@ -123,7 +123,7 @@ final class JsonInputStreamTests: XCTestCase {
         XCTAssertEqual(try jis.read(), nil)
         
         s = #"{"a":{"b":{"c":111}}}"#
-        jis = makeStream(s)
+        jis = try makeStream(s)
         expected = [
             .startObject(nil),
             .startObject(.name("a")),
@@ -146,7 +146,7 @@ final class JsonInputStreamTests: XCTestCase {
         var s = """
         [, 1, 2, 3]
         """
-        var jis = makeStream(s)
+        var jis = try makeStream(s)
         XCTAssertThrowsError(try consumeTokens(jis), "Leading comma in array") { err in
             print(err)
         }
@@ -154,7 +154,7 @@ final class JsonInputStreamTests: XCTestCase {
         s = """
         [1, 2,]
         """
-        jis = makeStream(s)
+        jis = try makeStream(s)
         XCTAssertThrowsError(try consumeTokens(jis), "Trailing comma in array") { err in
             print(err)
         }
@@ -162,7 +162,7 @@ final class JsonInputStreamTests: XCTestCase {
         s = """
         {, "a": 1, "b": 2}
         """
-        jis = makeStream(s)
+        jis = try makeStream(s)
         XCTAssertThrowsError(try consumeTokens(jis), "Leading comma in object") { err in
             print(err)
         }
@@ -170,7 +170,7 @@ final class JsonInputStreamTests: XCTestCase {
         s = """
         {"a": 1, "b": 2 ,}
         """
-        jis = makeStream(s)
+        jis = try makeStream(s)
         XCTAssertThrowsError(try consumeTokens(jis), "Trailing comma in object") { err in
             print(err)
         }
@@ -180,7 +180,7 @@ final class JsonInputStreamTests: XCTestCase {
         var s = """
         [[]
         """
-        var jis = makeStream(s)
+        var jis = try makeStream(s)
         XCTAssertThrowsError(try consumeTokens(jis, printTokens: true), "Orphan left bracket in array") { err in
             print(err)
         }
@@ -188,7 +188,7 @@ final class JsonInputStreamTests: XCTestCase {
         s = """
         {"a":1,
         """
-        jis = makeStream(s)
+        jis = try makeStream(s)
         XCTAssertThrowsError(try consumeTokens(jis, printTokens: true), "Orphan left bracket in array") { err in
             print(err)
         }
@@ -198,7 +198,7 @@ final class JsonInputStreamTests: XCTestCase {
         let s = #""\u20ac123 \"blah\/\" (\\) \r\n""#
         let expected = "\u{20ac}123 \"blah/\" (\\) \n"
         
-        let jis = makeStream(s)
+        let jis = try makeStream(s)
         let token = try jis.read()
         
         guard case let .string(key, str) = token else {
@@ -213,7 +213,7 @@ final class JsonInputStreamTests: XCTestCase {
     
     func testInvalidStringEscaping() throws {
         let s = #""\u20azzz""#
-        let jis = makeStream(s)
+        let jis = try makeStream(s)
         XCTAssertThrowsError(try jis.read()) { err in
             print(err)
         }
@@ -221,13 +221,13 @@ final class JsonInputStreamTests: XCTestCase {
     
     func testEmptyString() throws {
         let s = ""
-        let jis = makeStream(s)
+        let jis = try makeStream(s)
         XCTAssertEqual(try jis.read(), nil)
     }
     
     func testStringTooLong() throws {
         let s = "\"abcdefgh\u{20ac}ijklmnopqrstuvwxyz\""
-        let jis = makeStream(s)
+        let jis = try makeStream(s)
         jis.maxStringLength = 10
         
         XCTAssertThrowsError(try jis.read()) { err in
@@ -243,9 +243,7 @@ final class JsonInputStreamTests: XCTestCase {
         }
         """
         
-        let oldCapacity = JsonInputStream.bufferCapacity
-        JsonInputStream.bufferCapacity = 20
-        let jis = makeStream(s)
+        let jis = try makeStream(s, bufferCapacity: 20)
         
         let expected: [JsonToken] = [
             .startObject(nil),
@@ -259,7 +257,6 @@ final class JsonInputStreamTests: XCTestCase {
         }
         
         XCTAssertEqual(try jis.read(), nil)
-        JsonInputStream.bufferCapacity = oldCapacity
     }
         
     func consumeTokens(_ jis: JsonInputStream, printTokens: Bool = false) throws {
@@ -270,10 +267,10 @@ final class JsonInputStreamTests: XCTestCase {
         }
     }
     
-    func makeStream(_ s: String) -> JsonInputStream {
+    func makeStream(_ s: String, bufferCapacity: Int? = nil) throws -> JsonInputStream {
         let stream = InputStream(data: s.data(using: .utf8)!)
         stream.open()
-        return JsonInputStream(stream: stream)
+        return try JsonInputStream(stream: stream, bufferCapacity: bufferCapacity)
     }
 }
 
