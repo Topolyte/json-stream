@@ -175,7 +175,7 @@ public final class JsonInputStream {
         
         return res
     }
-        
+            
     public func read() throws -> JsonToken? {
         guard var c = try nextContentByte() else {
             guard case .root = state.last else {

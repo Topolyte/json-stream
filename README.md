@@ -1,11 +1,12 @@
 # JsonStream
 
-A streaming JSON parser and generator for Swift.
+A streaming JSON pull parser and generator for Swift.
 
 Parse JSON files of unlimited size or stream JSON from the network without fear of running out of memory.
 Selectively use only the parts of potentially large JSON files that are relevant to you.
 
-JsonStream does not provide any kind of mapping between Swift structs/classes and JSON objects.
+JsonStream allows you to read and write JSON content token by token.
+It does not provide any kind of mapping between Swift structs/classes and JSON objects.
 
 ## Controlling Memory Usage
 
@@ -21,9 +22,18 @@ To be on the safe side, you should plan for 4x the largest individual string val
 Using the default settings, this works out to a maximum memory usage of 41MB for the data structures of the parser.
 If you store any of the tokens you parse that would obviously add to your memory usage.
 
+## Parsing Large Numbers
+
+JSON doesn't specify how to deal with large number values. JsonInputStream reads numbers
+digit by digit into a Double value. If the value exceeds the precision of Double (15 decimal digits),
+information is lost and roundtripping is no longer exact.
+
+Numbers greater than Double.greatestFiniteMagnitude or less than Double.leastNonzeroMagnitude
+are rounded to positive and negative infinity respectively. 
+
 ## Installation
 
-
+https://github.com/Topolyte/json-stream.git
 
 ## Usage
 
