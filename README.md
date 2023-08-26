@@ -33,7 +33,23 @@ are rounded to positive and negative infinity respectively.
 
 ## Installation
 
-https://github.com/Topolyte/json-stream.git
+### Swift Package Manager
+
+Add the JsonStream package dependency to the dependencies section of your Package.swift
+and a product dependency to each target that uses JsonStream: 
+
+```
+let package = Package(
+    // name, platforms, products, etc.
+    dependencies: [
+        .package(url: "https://github.com/Topolyte/json-stream.git", from: "1.0.0")
+    ],
+    targets: [
+        .executableTarget(name: "<your target>", dependencies: [
+            .product(name: "JsonStream", package: "https://github.com/Topolyte/json-stream.git"),
+        ])
+    ]
+``` 
 
 ## Usage
 
