@@ -49,6 +49,7 @@ let package = Package(
             .product(name: "JsonStream", package: "https://github.com/Topolyte/json-stream.git"),
         ])
     ]
+)
 ``` 
 
 ## Usage
