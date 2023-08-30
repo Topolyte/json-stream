@@ -17,19 +17,24 @@ string values, not to the file as a whole. There is no file size limit.
 
 The maximum memory usage of the parser is currently at least 2x the largest string value plus the size of the input buffer.
 Depending on implementation details of the Swift standard library and Foundation classes it may grow even more.
-To be on the safe side, you should plan for 4x the largest individual string value plus the input buffer size.
+To be on the safe side you should plan for 4x the largest individual string value plus the input buffer size.
 
 Using the default settings, this works out to a maximum memory usage of 41MB for the data structures of the parser.
 If you store any of the tokens you parse that would obviously add to your memory usage.
 
-## Parsing Large Numbers
+## Parsing Numbers
 
-JSON doesn't specify how to deal with large number values. JsonInputStream reads numbers
-digit by digit into a Double value. If the value exceeds the precision of Double (15 decimal digits),
-information is lost and roundtripping is no longer exact.
+JsonInputStream returns numbers as Int64 if they contain less than 19 decimal digits
+and neither a decimal point nor an e. All other numbers are returned as Double 
+even if they are exactly representable as Int64.
 
-Numbers greater than Double.greatestFiniteMagnitude or less than Double.leastNonzeroMagnitude
-are rounded to positive and negative infinity respectively. 
+So all of the following numbers are returned as Int64: -1, 0, 100, 123456789012345678
+But these numbers are returned as Double in spite of the fact that they are whole
+numbers: -1.0, 0.0, 1e2, 1234567890123456789
+
+Note that all the usual warnings about floating point numbers apply. Double has
+a precision of ~15 digits. If you read Double numbers outside of this range, you will lose
+information and round-tripping will no longer be exact. 1e16 + 1 == 1e16.
 
 ## Installation
 

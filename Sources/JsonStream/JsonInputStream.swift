@@ -29,6 +29,7 @@ public struct JsonInputError: Error, CustomStringConvertible {
         case unexpectedEOF
         case stringTooLong
         case invalidUTF8
+        case unescapedControlCharacter
         case invalidEscapeSequence
         case unexpectedError
     }
@@ -39,10 +40,10 @@ public struct JsonInputError: Error, CustomStringConvertible {
     
     public var description: String {
         if let message = message {
-            return "\(line) \(kind) \(message)"
+            return "Line \(line): \(kind) \(message)"
         }
         
-        return "\(line) \(kind)"
+        return "Line \(line): \(kind)"
     }
 }
 
@@ -58,17 +59,17 @@ public enum JsonKey: CustomStringConvertible, Equatable {
             return "\(index)"
         }
     }
-    
-    public static func == (lhs: JsonKey, rhs: JsonKey) -> Bool {
-        switch (lhs, rhs) {
-        case let (.name(name1), .name(name2)):
-            return name1 == name2
-        case let (.index(index1), .index(index2)):
-            return index1 == index2
-        default:
-            return false
-        }
-    }
+}
+
+public enum JsonNumber: Equatable{
+    case int(Int64)
+    case double(Double)
+    case decimal(Decimal)
+}
+
+public enum JsonNumberParsingStrategy {
+    case intDouble
+    case allDecimal
 }
 
 public enum JsonToken: Equatable {
@@ -77,41 +78,21 @@ public enum JsonToken: Equatable {
     case startArray(_ key: JsonKey?)
     case endArray(_ key: JsonKey?)
     case string(_ key: JsonKey?, _ value: String)
-    case number(_ key: JsonKey?, _ value: Double)
+    case number(_ key: JsonKey?, _ value: JsonNumber)
     case bool(_ key: JsonKey?, _ value: Bool)
     case null(_ key: JsonKey?)
-    
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        switch (lhs, rhs) {
-        case let (.startObject(key1), .startObject(key2)):
-            return key1 == key2
-        case let (.endObject(key1), .endObject(key2)):
-            return key1 == key2
-        case let (.startArray(key1), .startArray(key2)):
-            return key1 == key2
-        case let (.endArray(key1), .endArray(key2)):
-            return key1 == key2
-        case let (.string(key1, val1), .string(key2, val2)):
-            return key1 == key2 && val1 == val2
-        case let (.number(key1, val1), .number(key2, val2)):
-            return key1 == key2 && val1 == val2
-        case let (.bool(key1, val1), .bool(key2, val2)):
-            return key1 == key2 && val1 == val2
-        case let (.null(key1), .null(key2)):
-            return key1 == key2
-        default:
-            return false
-        }
-    }
 }
     
 public final class JsonInputStream {
     enum ParseState {
-        case root, object(Int), array(Int)
+        case root
+        case object(Int)
+        case array(Int)
     }
 
     public static let defaultBufferCapacity = 1024 * 1024
     public static let defaultMaxStringLength = 1024 * 1024 * 10
+    public static let defaultNumberParsingStrategy = JsonNumberParsingStrategy.intDouble
     
     public private(set) var line = 1
     public private(set) var keyPath = [JsonKey]()
@@ -121,34 +102,47 @@ public final class JsonInputStream {
     let buf: UnsafeMutableBufferPointer<UInt8>
     let bufferCapacity: Int
     let maxStringLength: Int
+    let numberParsingStrategy: JsonNumberParsingStrategy
 
     var strbuf = Data()
+    var numbuf = ""
     var pos = 0
     var end = 0
     var arrayIndex = 0
     var state = [ParseState.root]
+    var rootValueSeen = false
 
-    public init(stream: InputStream, isOwningStream: Bool = true,
-                bufferCapacity: Int? = nil, maxStringLength: Int? = nil) throws {
+    public init(stream: InputStream,
+                isOwningStream: Bool = true,
+                bufferCapacity: Int? = nil,
+                maxStringLength: Int? = nil,
+                numberParsingStrategy: JsonNumberParsingStrategy? = nil) throws {
         
         self.stream = stream
         self.isOwningStream = isOwningStream
         self.bufferCapacity = bufferCapacity ?? Self.defaultBufferCapacity
         self.buf = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: self.bufferCapacity)
         self.maxStringLength = maxStringLength ?? Self.defaultMaxStringLength
-        
-        try checkStreamStatus()
+        self.numberParsingStrategy = numberParsingStrategy ?? Self.defaultNumberParsingStrategy
     }
 
-    public convenience init(filePath: String, bufferCapacity: Int? = nil,
-                            maxStringLength: Int? = nil) throws {
+    public convenience init(filePath: String,
+                            bufferCapacity: Int? = nil,
+                            maxStringLength: Int? = nil,
+                            numberParsingStrategy: JsonNumberParsingStrategy? = nil) throws {
         
         guard let istr = InputStream(fileAtPath: filePath) else {
             throw JsonInputError(kind: .ioError, line: 1, message: "Failed to open \(filePath)")
         }
 
         istr.open()
-        try self.init(stream: istr, isOwningStream: true)
+        try checkStreamStatus(istr, path: filePath)
+        
+        try self.init(stream: istr,
+                      isOwningStream: true,
+                      bufferCapacity: bufferCapacity,
+                      maxStringLength: maxStringLength,
+                      numberParsingStrategy: numberParsingStrategy)
     }
     
     deinit {
@@ -218,7 +212,12 @@ public final class JsonInputStream {
             
             let key = try JsonKey.name(readPropertyName())
             keyPath.append(key)
-            return try readValue(key)
+            
+            guard let value = try readValue(key) else {
+                throw err(.unexpectedEOF)
+            }
+            
+            return value
         case .array:
             if c == Ascii.rightSquare {
                 guard case let .array(index) = try popState() else {
@@ -255,6 +254,12 @@ public final class JsonInputStream {
         case .root:
             pushback()
             let token = try readValue(nil)
+            
+            if rootValueSeen {
+                throw errUnexpectedInput(c, expected: "End of input")
+            }
+            rootValueSeen = true
+            
             switch token {
             case .startObject, .startArray:
                 return token
@@ -295,7 +300,7 @@ public final class JsonInputStream {
         default:
             if isStartOfNumber(c) {
                 pushback()
-                return try .number(key, readDouble())
+                return try .number(key, readNumber())
             } else {
                 throw errUnexpectedInput(c)
             }
@@ -321,67 +326,139 @@ public final class JsonInputStream {
         pushState(.array(newIndex))
         return newIndex
     }
+
+    func readNumber() throws -> JsonNumber {
+        switch numberParsingStrategy {
+        case .intDouble:
+            let n = try readInt()
+            
+            guard let c = try nextByte() else {
+                return .int(n)
+            }
+            
+            if c == Ascii.dot || c == Ascii.e || c == Ascii.E || isDigit(c) {
+                pushback()
+                return try .double(readDouble(n))
+            } else {
+                pushback()
+                return .int(n)
+            }
+        case .allDecimal:
+            return try .decimal(readDecimal())
+        }
+    }
     
-    func readDouble() throws -> Double {
-        var d: Double
+    func readDecimal() throws -> Decimal {
+        numbuf.removeAll(keepingCapacity: true)
         
-        guard let n = try readDigits() else {
+        var pointSeen = false
+        var eSeen = false
+        
+        while let c = try nextByte() {
+            if isDigit(c) {
+                numbuf.append(Character(UnicodeScalar(c)))
+            } else if c == Ascii.dot {
+                if pointSeen || eSeen {
+                    throw errUnexpectedInput(c, expected: "number")
+                }
+                numbuf.append(Character(UnicodeScalar(c)))
+                pointSeen = true
+            } else if c == Ascii.e || c == Ascii.E {
+                if eSeen {
+                    throw errUnexpectedInput(c, expected: "number")
+                }
+                numbuf.append(Character(UnicodeScalar(c)))
+                eSeen = true
+            } else {
+                break
+            }
+        }
+        
+        if numbuf.isEmpty {
             throw err(.unexpectedEOF)
         }
         
-        d = n
-                
-        guard var c = try nextByte() else {
-            return d
+        guard let d = Decimal(string: numbuf) else {
+            throw err(.unexpectedInput, numbuf)
         }
         
-        if c == Ascii.dot {
-            guard let n = try readDigits(signed: false) else {
+        return d
+    }
+        
+    func readDouble(_ prefix: Int64) throws -> Double {
+        let sign = prefix >= 0 ? 1.0 : -1.0
+        var d = abs(Double(prefix))
+        var pointSeen = false
+        
+        while true {
+            guard let c = try nextByte() else {
+                return d * sign
+            }
+            
+            if c == Ascii.dot {
+                if pointSeen {
+                    throw errUnexpectedInput(c)
+                }
+                pointSeen = true
+                d += try readFraction()
+            } else if c == Ascii.e || c == Ascii.E {
+                let exp = try Double(readInt())
+                d *= pow(10.0, exp)
+                break
+            } else if isDigit(c) {
+                pushback()
+                let n = try Double(readInt())
+                d = d * pow(10, digitsCount(n)) + n
+            } else {
+                pushback()
+                break
+            }
+        }
+        
+        return d * sign
+    }
+    
+    func readFraction() throws -> Double {
+        var d = 0.0
+        var zeroCount = 0
+        
+        while let c = try nextByte(), isDigit(c) {
+            if c == Ascii.zero {
+                zeroCount += 1
+            } else {
+                pushback()
+                let n = try Double(readInt(signed: false))
+                let nDigits = digitsCount(n) + Double(zeroCount)
+                d = d + n * pow(10, -nDigits)
+                zeroCount = 0
+            }
+        }
+        
+        if d.isZero && zeroCount == 0 {
+            guard let c = try nextByte() else {
                 throw err(.unexpectedEOF)
             }
-            
-            if n > 0 {
-                let digits = floor(log10(n)) + 1
-                let frac = n * pow(10.0, digits * -1)
-                
-                if d >= 0 {
-                    d += frac
-                } else {
-                    d -= frac
-                }
-            }
-
-            guard let next = try nextByte() else {
-                return d
-            }
-            
-            c = next
+            throw errUnexpectedInput(c, expected: "digits")
         }
-                
-        if c == Ascii.e || c == Ascii.E {
-            guard let n = try readDigits() else {
-                throw errUnexpectedInput(c, expected: "number")
-            }
-            
-            d *= pow(10.0, n)
-        } else {
+        
+        if pos > 0 {
             pushback()
         }
         
         return d
     }
-    
-    func readDigits(signed: Bool = true) throws -> Double? {
-        var sign = 1
+            
+    func readInt(signed: Bool = true) throws -> Int64 {
+        var sign: Int64 = 1
         
         guard var c = try nextByte() else {
-            return nil
+            throw err(.unexpectedEOF)
         }
         
         if c == Ascii.minus || c == Ascii.plus {
             if c == Ascii.minus {
                 if !signed {
-                    throw errUnexpectedInput(c, expected: "digits")
+                    throw errUnexpectedInput(c, expected: "number")
                 }
                 sign = -1
             }
@@ -397,35 +474,29 @@ public final class JsonInputStream {
             throw errUnexpectedInput(c, expected: "number")
         }
         
-        var d = 0.0
-        var n = UInt64(c - Ascii.zero)
+        let hasLeadingZero = c == Ascii.zero
+        var n: Int64 = Int64(c - Ascii.zero)
         var nDigits = 1
-        var overflow = false
         
         while let c = try nextByte() {
-            if isDigit(c) {
-                if nDigits < 19 {
-                    n = n * 10 + UInt64(c - Ascii.zero)
-                    nDigits += 1
-                } else {
-                    d = d * pow(10.0, Double(nDigits)) + Double(n)
-                    n = UInt64(c - Ascii.zero)
-                    nDigits = 1
-                    overflow = true
-                }
+            if isDigit(c) && nDigits < 18 {
+                n = n * 10 + Int64(c - Ascii.zero)
+                nDigits += 1
             } else {
                 pushback()
                 break
             }
         }
         
-        if !overflow {
-            d = Double(n)
-        } else {
-            d = d * pow(10, Double(nDigits)) + Double(n)
+        if hasLeadingZero && nDigits > 1 {
+            throw err(.unexpectedInput, "Number with leading zero")
         }
-        
-        return d * Double(sign)
+                
+        return n * sign
+    }
+    
+    func digitsCount(_ d: Double) -> Double {
+        return floor(log10(d)) + 1
     }
     
     func isDigit(_ c: UInt8) -> Bool {
@@ -461,12 +532,18 @@ public final class JsonInputStream {
                     throw err(.invalidUTF8)
                 }
                 return s
+            } else if isControlCharacter(c) {
+                throw err(.unescapedControlCharacter)
             } else {
                 strbuf.append(c)
             }
         }
         
         throw err(.unexpectedEOF)
+    }
+    
+    func isControlCharacter(_ c: UInt8) -> Bool {
+        (0...0x1F).contains(c)
     }
     
     func validStringPrefix(_ data: Data, count: Int) -> String {
@@ -526,7 +603,13 @@ public final class JsonInputStream {
     }
     
     func readHexEscape() throws {
-        let n = try readHex()
+        var n = try readHex()
+        
+        if isHighSurrogate(n) {
+            try mustRead("\\u")
+            let lowSurrogate = try readHex()
+            n = surrogatePairToCodePoint(n, lowSurrogate)
+        }
         
         guard let u = UnicodeScalar(n) else {
             throw err(.invalidEscapeSequence, "Invalid unicode scalar \(n)")
@@ -546,7 +629,7 @@ public final class JsonInputStream {
             strbuf.append(contentsOf: Array(ch.utf8))
         }
     }
-    
+        
     func readHex() throws -> Int {
         var n = 0
         
@@ -568,6 +651,18 @@ public final class JsonInputStream {
         }
 
         return n
+    }
+    
+    func isHighSurrogate(_ n: Int) -> Bool {
+        (0xD800...0xDBFF).contains(n)
+    }
+    
+    func isLowSurrogate(_ n: Int) -> Bool {
+        (0xDC00...0xDFFF).contains(n)
+    }
+    
+    func surrogatePairToCodePoint(_ high: Int, _ low: Int) -> Int {
+        (high - 0xD800) * 0x400 + low - 0xDC00 + 0x10000
     }
         
     func isStartOfNumber(_ c: UInt8) -> Bool {
@@ -691,19 +786,7 @@ public final class JsonInputStream {
         
         return end > 0
     }
-    
-    func checkStreamStatus() throws {
-        if let error = stream.streamError {
-            throw JsonInputError(kind: .ioError, line: line, message: "\(error)")
-        }
-        
-        if stream.streamStatus != .open && stream.streamStatus != .atEnd {
-            throw JsonInputError(
-                kind: .ioError, line: line,
-                message: "Unexpected stream status: \(statusDescription(stream.streamStatus))")
-        }
-    }
-        
+            
     func err(_ kind: JsonInputError.ErrorKind, _ message: String? = nil) -> JsonInputError {
         JsonInputError(kind: kind, line: line, message: message)
     }
@@ -718,5 +801,17 @@ public final class JsonInputStream {
         message += "\(UnicodeScalar(c))\(readRaw(20))"
         
         return JsonInputError(kind: .unexpectedInput, line: line, message: message)
+    }
+}
+
+func checkStreamStatus(_ stream: InputStream, path: String) throws {
+    if let error = stream.streamError {
+        throw JsonInputError(kind: .ioError, line: 1, message: "Path: \(path), \(error)")
+    }
+    
+    if stream.streamStatus != .open && stream.streamStatus != .atEnd {
+        throw JsonInputError(
+            kind: .ioError, line: 1,
+            message: "Path: \(path), unexpected stream status: \(statusDescription(stream.streamStatus))")
     }
 }

@@ -3,6 +3,14 @@ import XCTest
 
 final class JsonInputStreamTests: XCTestCase {
     
+//    func testAdHoc() throws {
+//        let s = #"{"a":"#
+//
+//        let jis = try makeStream(s)
+//
+//        try consumeTokens(jis, printTokens: true)
+//    }
+    
     func testBasics() throws {
         let s = """
         {
@@ -22,18 +30,18 @@ final class JsonInputStreamTests: XCTestCase {
             .string(.name("type"), "Captain"),
             .string(.name("name"), "Jean-Luc Picard"),
             .startObject(.name("speed")),
-            .number(.name("quantity"), 500500.0),
+            .number(.name("quantity"), JsonNumber.double(500500.0)),
             .string(.name("unit"), "m/s"),
             .endObject(.name("speed")),
             .bool(.name("isFrench"), true),
             .null(.name("height")),
             .startArray(.name("postings")),
             .string(.index(0), "USS-Enterprise-D"),
-            .number(.index(1), 2363.0),
+            .number(.index(1), JsonNumber.int(2363)),
             .string(.index(2), "USS-Enterprise-E"),
-            .number(.index(3), 2372.0),
+            .number(.index(3), JsonNumber.int(2372)),
             .endArray(.name("postings")),
-            .number(.name("boldness"), 101.0),
+            .number(.name("boldness"), JsonNumber.int(101)),
             .endObject(nil)
         ]
         
@@ -45,38 +53,42 @@ final class JsonInputStreamTests: XCTestCase {
     }
     
     func testNumber() throws {
-        let valid = [
-            ("1", 1.0),
-            ("0", 0.0),
-            ("1.23", 1.23),
-            ("-11.234", -11.234),
-            ("0.2233", 0.2233),
-            ("12.40", 12.4),
-            ("01.10", 1.1),
-            ("-0.0", 0.0),
-            ("1.23e+14", 1.23e14),
-            ("1.23e-4", 1.23e-4),
-            ("11e4", 110000.0),
-            ("-12345678901234567890123456789.123", -12345678901234567890123456789.123),
-            ("1234567890123456789", 1234567890123456789.0)
+        let valid: [(String, JsonNumber)] = [
+            ("1", .int(1)),
+            ("0", .int(0)),
+            ("0.0", .double(0.0)),
+            ("1.23", .double(1.23)),
+            ("-11.234", .double(-11.234)),
+            ("0.2233", .double(0.2233)),
+            ("12.40", .double(12.4)),
+            ("-0.0", .double(0.0)),
+            ("1.0012300", .double(1.00123)),
+            ("1.23E+14", .double(1.23e14)),
+            ("1.23e-4", .double(1.23e-4)),
+            ("11e4", .double(110000.0)),
+            ("-12345678901234567890123456789.123", .double(-12345678901234567890123456789.123)),
+            ("999999999999999999", .int(999999999999999999)),
+            ("1234567890123456789", .double(1234567890123456789.0))
         ]
         
         let invalid = [
             ".1", "--1.2", "12,345.6", "12.34.56", "12 345", "12_345",
-            "1.2a4", "0xABC", "1.2 e4", "12-e4", "12."
+            "1.2a4", "0xABC", "1.2 e4", "12-e4", "12.", "1e4.1", "01"
         ]
         
         for (s, n) in valid {
+            print(s)
             let jis = try makeStream(s)
             XCTAssertEqual(try jis.read(), .number(nil, n))
         }
         
         for s in invalid {
+            print(s)
             let jis = try makeStream(s)
             XCTAssertThrowsError(try consumeTokens(jis))
         }
     }
-        
+            
     func testNestedEmptyArrays() throws {
         let s = """
         [[]]
@@ -128,7 +140,7 @@ final class JsonInputStreamTests: XCTestCase {
             .startObject(nil),
             .startObject(.name("a")),
             .startObject(.name("b")),
-            .number(.name("c"), 111.0),
+            .number(.name("c"), JsonNumber.int(111)),
             .endObject(.name("b")),
             .endObject(.name("a")),
             .endObject(nil)
@@ -234,6 +246,26 @@ final class JsonInputStreamTests: XCTestCase {
         }
     }
     
+    func testNumberArrays() throws {
+        let s = "[1.23e4,0.001  ,1]"
+        
+        let expected: [JsonToken] = [
+            .startArray(nil),
+            .number(.index(0), .double(1.23e4)),
+            .number(.index(1), .double(0.001)),
+            .number(.index(2), .int(1)),
+            .endArray(nil)
+        ]
+        
+        let jis = try makeStream(s)
+        
+        for e in expected {
+            XCTAssertEqual(try jis.read(), e)
+        }
+        
+        XCTAssertNil(try jis.read())
+    }
+        
     func testBuffering() throws {
         let s = """
         {
@@ -295,15 +327,7 @@ final class JsonInputStreamTests: XCTestCase {
         XCTAssertEqual(cameraPath, "starship.features[0].sensors[1]")
         XCTAssertEqual(typePath, "starship.type")
     }
-        
-    func consumeTokens(_ jis: JsonInputStream, printTokens: Bool = false) throws {
-        while let token = try jis.read() {
-            if printTokens {
-                print(token)
-            }
-        }
-    }
-    
+            
     func makeStream(_ s: String, bufferCapacity: Int? = nil, maxStringLength: Int? = nil) throws -> JsonInputStream {
         let stream = InputStream(data: s.data(using: .utf8)!)
         stream.open()
