@@ -234,7 +234,7 @@ final class JsonInputStreamTests: XCTestCase {
     func testEmptyString() throws {
         let s = ""
         let jis = try makeStream(s)
-        XCTAssertEqual(try jis.read(), nil)
+        XCTAssertThrowsError(try jis.read())
     }
     
     func testStringTooLong() throws {

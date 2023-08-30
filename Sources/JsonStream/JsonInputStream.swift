@@ -175,6 +175,9 @@ public final class JsonInputStream {
             guard case .root = state.last else {
                 throw err(.unexpectedEOF)
             }
+            guard rootValueSeen else {
+                throw err(.unexpectedEOF)
+            }
             return nil
         }
         
@@ -741,10 +744,6 @@ public final class JsonInputStream {
 
         if c == Ascii.lf {
             line += 1
-        }
-
-        if c == 0 {
-            return nil
         }
         
         return c
