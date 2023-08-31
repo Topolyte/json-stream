@@ -95,7 +95,7 @@ public final class JsonInputStream {
     public static let defaultNumberParsing = NumberParsing.intDouble
     
     public private(set) var line = 1
-    public private(set) var keyPath = [JsonKey]()
+    public private(set) var path = [JsonKey]()
     
     let stream: InputStream
     let closeStream: Bool
@@ -175,10 +175,10 @@ public final class JsonInputStream {
         buf.deallocate()
     }
     
-    public var keyPathString: String {
+    public var pathString: String {
         var res = ""
         
-        for key in keyPath {
+        for key in path {
             switch key {
             case .index(let i):
                 res.append("[\(i)]")
@@ -191,6 +191,20 @@ public final class JsonInputStream {
         }
         
         return res
+    }
+    
+    public func pathMatch(_ keys: JsonKey...) -> Bool {
+        var k = 0
+        var p = 0
+        
+        while p < path.count && k < keys.count {
+            if keys[k] == path[p] {
+                k += 1
+            }
+            p += 1
+        }
+        
+        return k == keys.count
     }
             
     public func read() throws -> JsonToken? {
@@ -213,7 +227,7 @@ public final class JsonInputStream {
                 if index >= 0 {
                     popPath()
                 }
-                return .endObject(keyPath.last)
+                return .endObject(path.last)
             }
             
             let nextIndex = try incrementObjectIndex()
@@ -237,7 +251,7 @@ public final class JsonInputStream {
             }
             
             let key = try JsonKey.name(readPropertyName())
-            keyPath.append(key)
+            path.append(key)
             
             guard let value = try readValue(key) else {
                 throw err(.unexpectedEOF)
@@ -252,7 +266,7 @@ public final class JsonInputStream {
                 if index >= 0 {
                     popPath()
                 }
-                return .endArray(keyPath.last)
+                return .endArray(path.last)
             }
             
             let nextIndex = try incrementArrayIndex()
@@ -274,7 +288,7 @@ public final class JsonInputStream {
             }
             
             let key = JsonKey.index(nextIndex)
-            keyPath.append(key)
+            path.append(key)
             pushback()
             return try readValue(key)
         case .root:
@@ -605,7 +619,8 @@ public final class JsonInputStream {
                 }
                 return s
             } else if isControlCharacter(c) {
-                throw err(.unescapedControlCharacter)
+                throw err(.unescapedControlCharacter,
+                          "\(c) in \(validStringPrefix(strbuf, count: 20))")
             } else {
                 strbuf.append(c)
             }
@@ -767,7 +782,7 @@ public final class JsonInputStream {
     
     @discardableResult
     func popPath() -> JsonKey? {
-        return keyPath.popLast()
+        return path.popLast()
     }
         
     func readRaw(_ count: Int) -> String {

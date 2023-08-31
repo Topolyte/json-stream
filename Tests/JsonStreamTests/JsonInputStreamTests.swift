@@ -458,9 +458,9 @@ final class JsonInputStreamTests: XCTestCase {
         while let token = try jis.read() {
             switch token {
             case .string(.index(1), "camera"):
-                cameraPath = jis.keyPathString
+                cameraPath = jis.pathString
             case .string(.name("type"), "research vessel"):
-                typePath = jis.keyPathString
+                typePath = jis.pathString
             default:
                 break
             }
