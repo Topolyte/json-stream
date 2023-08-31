@@ -64,5 +64,13 @@ let package = Package(
 
 ## Usage
 
+### JsonInputStream
+
+```
+import JsonStream
+
+let jis = 
+
+```
 
 

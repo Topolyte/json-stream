@@ -151,7 +151,23 @@ public final class JsonInputStream {
                       maxValueLength: maxValueLength,
                       numberParsing: numberParsing)
     }
-    
+
+    public convenience init(data: Data,
+                            bufferCapacity: Int? = nil,
+                            maxValueLength: Int? = nil,
+                            numberParsing: NumberParsing? = nil) throws
+    {
+        let istr = InputStream(data: data)
+        istr.open()
+        try checkStreamStatus(istr, path: "")
+        
+        try self.init(stream: istr,
+                      closeStream: true,
+                      bufferCapacity: bufferCapacity,
+                      maxValueLength: maxValueLength,
+                      numberParsing: numberParsing)
+    }
+
     deinit {
         if closeStream {
             stream.close()

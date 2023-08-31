@@ -2,15 +2,7 @@ import XCTest
 @testable import JsonStream
 
 final class JsonInputStreamTests: XCTestCase {
-    
-//    func testAdHoc() throws {
-//        let s = #"{"a":"#
-//
-//        let jis = try makeStream(s)
-//
-//        try consumeTokens(jis, printTokens: true)
-//    }
-    
+        
     func testBasics() throws {
         let s = """
         {
