@@ -51,8 +51,49 @@ final class JsonInputStreamTests: XCTestCase {
 
         XCTAssertEqual(try jis.read(), nil)
     }
-    
-    func testNumber() throws {
+
+    func testBasicsDecimal() throws {
+        let s = """
+        {
+            "type": "Captain",
+            "name": "Jean-Luc Picard",
+            "speed": {"quantity": 500.5e3, "unit": "m/s"},
+            "isFrench": true,
+            "height": null,
+            "postings": ["USS-Enterprise-D", 2363, "USS-Enterprise-E", 2372],
+            "boldness": 101
+        }
+        """
+        let jis = try makeStream(s, numberParsing: .allDecimal)
+        
+        let expected: [JsonToken] = [
+            .startObject(nil),
+            .string(.name("type"), "Captain"),
+            .string(.name("name"), "Jean-Luc Picard"),
+            .startObject(.name("speed")),
+            .number(.name("quantity"), JsonNumber.decimal(Decimal(string: "500500.0")!)),
+            .string(.name("unit"), "m/s"),
+            .endObject(.name("speed")),
+            .bool(.name("isFrench"), true),
+            .null(.name("height")),
+            .startArray(.name("postings")),
+            .string(.index(0), "USS-Enterprise-D"),
+            .number(.index(1), JsonNumber.decimal(2363)),
+            .string(.index(2), "USS-Enterprise-E"),
+            .number(.index(3), JsonNumber.decimal(2372)),
+            .endArray(.name("postings")),
+            .number(.name("boldness"), JsonNumber.decimal(101)),
+            .endObject(nil)
+        ]
+        
+        for token in expected {
+            XCTAssertEqual(try jis.read(), token)
+        }
+
+        XCTAssertEqual(try jis.read(), nil)
+    }
+
+    func testNumbers() throws {
         let valid: [(String, JsonNumber)] = [
             ("1", .int(1)),
             ("0", .int(0)),
@@ -88,7 +129,44 @@ final class JsonInputStreamTests: XCTestCase {
             XCTAssertThrowsError(try consumeTokens(jis))
         }
     }
-            
+
+    func testDecimalNumbers() throws {
+        let valid: [(String, JsonNumber)] = [
+            ("1", .decimal(Decimal(string: "1")!)),
+            ("0", .decimal(Decimal(string: "0")!)),
+            ("0.0", .decimal(Decimal(string: "0.0")!)),
+            ("1.23", .decimal(Decimal(string: "1.23")!)),
+            ("-11.234", .decimal(Decimal(string: "-11.234")!)),
+            ("0.2233", .decimal(Decimal(string: "0.2233")!)),
+            ("12.40", .decimal(Decimal(string: "12.4")!)),
+            ("-0.0", .decimal(Decimal(string: "0.0")!)),
+            ("1.0012300", .decimal(Decimal(string: "1.00123")!)),
+            ("1.23E+14", .decimal(Decimal(string: "1.23e14")!)),
+            ("1.23e-4", .decimal(Decimal(string: "1.23e-4")!)),
+            ("11e4", .decimal(Decimal(string: "110000.0")!)),
+            ("-12345678901234567890123456789.123", .decimal(Decimal(string: "-12345678901234567890123456789.123")!)),
+            ("999999999999999999", .decimal(Decimal(string: "999999999999999999")!)),
+            ("1234567890123456789", .decimal(Decimal(string: "1234567890123456789")!))
+        ]
+        
+        let invalid = [
+            ".1", "--1.2", "12,345.6", "12.34.56", "12 345", "12_345",
+            "1.2a4", "0xABC", "1.2 e4", "12-e4", "12.", "1e4.1", "01"
+        ]
+        
+        for (s, n) in valid {
+            print(s)
+            let jis = try makeStream(s, numberParsing: .allDecimal)
+            XCTAssertEqual(try jis.read(), .number(nil, n))
+        }
+        
+        for s in invalid {
+            print(s)
+            let jis = try makeStream(s, numberParsing: .allDecimal)
+            XCTAssertThrowsError(try consumeTokens(jis))
+        }
+    }
+    
     func testNestedEmptyArrays() throws {
         let s = """
         [[]]
@@ -187,7 +265,41 @@ final class JsonInputStreamTests: XCTestCase {
             print(err)
         }
     }
-    
+
+    func testMisplacedCommaDecimal() throws {
+        var s = """
+        [, 1, 2, 3]
+        """
+        var jis = try makeStream(s, numberParsing: .allDecimal)
+        XCTAssertThrowsError(try consumeTokens(jis), "Leading comma in array") { err in
+            print(err)
+        }
+        
+        s = """
+        [1, 2,]
+        """
+        jis = try makeStream(s, numberParsing: .allDecimal)
+        XCTAssertThrowsError(try consumeTokens(jis), "Trailing comma in array") { err in
+            print(err)
+        }
+
+        s = """
+        {, "a": 1, "b": 2}
+        """
+        jis = try makeStream(s, numberParsing: .allDecimal)
+        XCTAssertThrowsError(try consumeTokens(jis), "Leading comma in object") { err in
+            print(err)
+        }
+
+        s = """
+        {"a": 1, "b": 2 ,}
+        """
+        jis = try makeStream(s, numberParsing: .allDecimal)
+        XCTAssertThrowsError(try consumeTokens(jis), "Trailing comma in object") { err in
+            print(err)
+        }
+    }
+
     func testUnbalancedBrackets() throws {
         var s = """
         [[]
@@ -205,7 +317,25 @@ final class JsonInputStreamTests: XCTestCase {
             print(err)
         }
     }
-    
+
+    func testUnbalancedBracketsDecimal() throws {
+        var s = """
+        [[]
+        """
+        var jis = try makeStream(s, numberParsing: .allDecimal)
+        XCTAssertThrowsError(try consumeTokens(jis, printTokens: true), "Orphan left bracket in array") { err in
+            print(err)
+        }
+        
+        s = """
+        {"a":1,
+        """
+        jis = try makeStream(s, numberParsing: .allDecimal)
+        XCTAssertThrowsError(try consumeTokens(jis, printTokens: true), "Orphan left bracket in array") { err in
+            print(err)
+        }
+    }
+
     func testStringEscaping() throws {
         let s = #""\u20ac123 \"blah\/\" (\\) \r\n""#
         let expected = "\u{20ac}123 \"blah/\" (\\) \n"
@@ -239,7 +369,7 @@ final class JsonInputStreamTests: XCTestCase {
     
     func testStringTooLong() throws {
         let s = "\"abcdefgh\u{20ac}ijklmnopqrstuvwxyz\""
-        let jis = try makeStream(s, maxStringLength: 10)
+        let jis = try makeStream(s, maxValueLength: 10)
         
         XCTAssertThrowsError(try jis.read()) { err in
             print(err)
@@ -265,7 +395,27 @@ final class JsonInputStreamTests: XCTestCase {
         
         XCTAssertNil(try jis.read())
     }
+
+    func testNumberArraysDecimal() throws {
+        let s = "[1.23e4,0.001  ,1]"
         
+        let expected: [JsonToken] = [
+            .startArray(nil),
+            .number(.index(0), .decimal(Decimal(string: "1.23e4")!)),
+            .number(.index(1), .decimal(Decimal(string: "0.001")!)),
+            .number(.index(2), .decimal(1)),
+            .endArray(nil)
+        ]
+        
+        let jis = try makeStream(s, numberParsing: .allDecimal)
+        
+        for e in expected {
+            XCTAssertEqual(try jis.read(), e)
+        }
+        
+        XCTAssertNil(try jis.read())
+    }
+
     func testBuffering() throws {
         let s = """
         {
@@ -328,12 +478,17 @@ final class JsonInputStreamTests: XCTestCase {
         XCTAssertEqual(typePath, "starship.type")
     }
             
-    func makeStream(_ s: String, bufferCapacity: Int? = nil, maxStringLength: Int? = nil) throws -> JsonInputStream {
+    func makeStream(_ s: String, bufferCapacity: Int? = nil,
+                    maxValueLength: Int? = nil,
+                    numberParsing: JsonInputStream.NumberParsing = .intDouble)
+    throws -> JsonInputStream {
+        
         let stream = InputStream(data: s.data(using: .utf8)!)
         stream.open()
         
         return try JsonInputStream(
-            stream: stream, bufferCapacity: bufferCapacity, maxStringLength: maxStringLength)
+            stream: stream, bufferCapacity: bufferCapacity, maxValueLength: maxValueLength,
+            numberParsing: numberParsing)
     }
 }
 

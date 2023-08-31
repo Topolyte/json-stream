@@ -28,13 +28,22 @@ final class JTSTests: XCTestCase {
     }
 
     func testJTS() throws {
+        try runJTS(numberParsing: .intDouble)
+    }
+    
+    func testJTSDecimal() throws {
+        try runJTS(numberParsing: .allDecimal)
+    }
+    
+    func runJTS(numberParsing: JsonInputStream.NumberParsing) throws {
         let fm = FileManager.default
         let dir = URL(filePath: jtsPath).appending(path: "test_parsing", directoryHint: .isDirectory)
         
         for fileName in try fm.contentsOfDirectory(atPath: dir.path()) {
             let testType = TestType(rawValue: fileName.first!)!
             let fileURL = dir.appending(path: fileName, directoryHint: .notDirectory)
-            let jis = try JsonInputStream(filePath: fileURL.path(percentEncoded: false))
+            let jis = try JsonInputStream(filePath: fileURL.path(percentEncoded: false),
+                                          numberParsing: numberParsing)
             
             switch testType {
             case .mustSucceed:

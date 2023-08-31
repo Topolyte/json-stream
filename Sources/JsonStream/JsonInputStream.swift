@@ -27,7 +27,7 @@ public struct JsonInputError: Error, CustomStringConvertible {
         case ioError
         case unexpectedInput
         case unexpectedEOF
-        case stringTooLong
+        case valueTooLong
         case invalidUTF8
         case unescapedControlCharacter
         case invalidEscapeSequence
@@ -67,11 +67,6 @@ public enum JsonNumber: Equatable{
     case decimal(Decimal)
 }
 
-public enum JsonNumberParsingStrategy {
-    case intDouble
-    case allDecimal
-}
-
 public enum JsonToken: Equatable {
     case startObject(_ key: JsonKey?)
     case endObject(_ key: JsonKey?)
@@ -89,20 +84,25 @@ public final class JsonInputStream {
         case object(Int)
         case array(Int)
     }
+    
+    public enum NumberParsing {
+        case intDouble
+        case allDecimal
+    }
 
     public static let defaultBufferCapacity = 1024 * 1024
-    public static let defaultMaxStringLength = 1024 * 1024 * 10
-    public static let defaultNumberParsingStrategy = JsonNumberParsingStrategy.intDouble
+    public static let defaultMaxValueLength = 1024 * 1024 * 10
+    public static let defaultNumberParsing = NumberParsing.intDouble
     
     public private(set) var line = 1
     public private(set) var keyPath = [JsonKey]()
     
     let stream: InputStream
-    let isOwningStream: Bool
+    let closeStream: Bool
     let buf: UnsafeMutableBufferPointer<UInt8>
     let bufferCapacity: Int
-    let maxStringLength: Int
-    let numberParsingStrategy: JsonNumberParsingStrategy
+    let maxValueLength: Int
+    let numberParsing: NumberParsing
 
     var strbuf = Data()
     var numbuf = ""
@@ -113,24 +113,31 @@ public final class JsonInputStream {
     var rootValueSeen = false
 
     public init(stream: InputStream,
-                isOwningStream: Bool = true,
+                closeStream: Bool = true,
                 bufferCapacity: Int? = nil,
-                maxStringLength: Int? = nil,
-                numberParsingStrategy: JsonNumberParsingStrategy? = nil) throws {
-        
+                maxValueLength: Int? = nil,
+                numberParsing: NumberParsing? = nil) throws
+    {
         self.stream = stream
-        self.isOwningStream = isOwningStream
+        
+        if self.stream.streamStatus == .notOpen {
+            self.stream.open()
+            self.closeStream = true
+        } else {
+            self.closeStream = closeStream
+        }
+        
         self.bufferCapacity = bufferCapacity ?? Self.defaultBufferCapacity
         self.buf = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: self.bufferCapacity)
-        self.maxStringLength = maxStringLength ?? Self.defaultMaxStringLength
-        self.numberParsingStrategy = numberParsingStrategy ?? Self.defaultNumberParsingStrategy
+        self.maxValueLength = maxValueLength ?? Self.defaultMaxValueLength
+        self.numberParsing = numberParsing ?? Self.defaultNumberParsing
     }
 
     public convenience init(filePath: String,
                             bufferCapacity: Int? = nil,
-                            maxStringLength: Int? = nil,
-                            numberParsingStrategy: JsonNumberParsingStrategy? = nil) throws {
-        
+                            maxValueLength: Int? = nil,
+                            numberParsing: NumberParsing? = nil) throws
+    {
         guard let istr = InputStream(fileAtPath: filePath) else {
             throw JsonInputError(kind: .ioError, line: 1, message: "Failed to open \(filePath)")
         }
@@ -139,14 +146,14 @@ public final class JsonInputStream {
         try checkStreamStatus(istr, path: filePath)
         
         try self.init(stream: istr,
-                      isOwningStream: true,
+                      closeStream: true,
                       bufferCapacity: bufferCapacity,
-                      maxStringLength: maxStringLength,
-                      numberParsingStrategy: numberParsingStrategy)
+                      maxValueLength: maxValueLength,
+                      numberParsing: numberParsing)
     }
     
     deinit {
-        if isOwningStream {
+        if closeStream {
             stream.close()
         }
         buf.deallocate()
@@ -331,7 +338,7 @@ public final class JsonInputStream {
     }
 
     func readNumber() throws -> JsonNumber {
-        switch numberParsingStrategy {
+        switch numberParsing {
         case .intDouble:
             let n = try readInt()
             
@@ -352,34 +359,82 @@ public final class JsonInputStream {
     }
     
     func readDecimal() throws -> Decimal {
-        numbuf.removeAll(keepingCapacity: true)
-        
-        var pointSeen = false
-        var eSeen = false
-        
-        while let c = try nextByte() {
-            if isDigit(c) {
-                numbuf.append(Character(UnicodeScalar(c)))
-            } else if c == Ascii.dot {
-                if pointSeen || eSeen {
-                    throw errUnexpectedInput(c, expected: "number")
-                }
-                numbuf.append(Character(UnicodeScalar(c)))
-                pointSeen = true
-            } else if c == Ascii.e || c == Ascii.E {
-                if eSeen {
-                    throw errUnexpectedInput(c, expected: "number")
-                }
-                numbuf.append(Character(UnicodeScalar(c)))
-                eSeen = true
-            } else {
-                break
+        func numbufAppend(_ c: UInt8) throws {
+            if numbuf.utf8.count == maxValueLength {
+                throw err(.valueTooLong)
             }
+            numbuf.append(Character(UnicodeScalar(c)))
         }
         
-        if numbuf.isEmpty {
-            throw err(.unexpectedEOF)
+        func digits(signed: Bool, allowLeadingZero: Bool) throws {
+            guard var c = try nextByte() else {
+                throw err(.unexpectedEOF)
+            }
+            
+            if c == Ascii.minus || c == Ascii.plus {
+                guard signed else {
+                    throw errUnexpectedInput(c, expected: "decimal digits")
+                }
+                try numbufAppend(c)
+                guard let next = try nextByte() else {
+                    throw err(.unexpectedEOF)
+                }
+                c = next
+            }
+            
+            guard isDigit(c) else {
+                throw errUnexpectedInput(c)
+            }
+            
+            numbuf.append(Character(UnicodeScalar(c)))
+            let first = c
+            var digitsCount = 1
+            
+            while let c = try nextByte(), isDigit(c) {
+                try numbufAppend(c)
+                digitsCount += 1
+            }
+            
+            guard digitsCount == 1 || first != Ascii.zero || allowLeadingZero else {
+                throw errUnexpectedInput(Ascii.zero)
+            }
+            
+            pushback()
         }
+        
+        func optionalFraction() throws {
+            guard let c = try nextByte() else {
+                return
+            }
+            
+            if c == Ascii.dot {
+                try numbufAppend(c)
+                try digits(signed: false, allowLeadingZero: true)
+                return
+            }
+            
+            pushback()
+            return
+        }
+        
+        func optionalExponent() throws {
+            guard let c = try nextByte() else {
+                return
+            }
+            
+            guard c == Ascii.e || c == Ascii.E else {
+                pushback()
+                return
+            }
+            
+            try numbufAppend(Ascii.e)
+            try digits(signed: true, allowLeadingZero: false)
+        }
+        
+        numbuf.removeAll(keepingCapacity: true)
+        try digits(signed: true, allowLeadingZero: false)
+        try optionalFraction()
+        try optionalExponent()
         
         guard let d = Decimal(string: numbuf) else {
             throw err(.unexpectedInput, numbuf)
@@ -444,9 +499,7 @@ public final class JsonInputStream {
             throw errUnexpectedInput(c, expected: "digits")
         }
         
-        if pos > 0 {
-            pushback()
-        }
+        pushback()
         
         return d
     }
@@ -524,8 +577,8 @@ public final class JsonInputStream {
         strbuf.removeAll(keepingCapacity: true)
         
         while let c = try nextByte() {
-            if strbuf.count >= maxStringLength {
-                throw err(.stringTooLong, validStringPrefix(strbuf, count: 50))
+            if strbuf.count >= maxValueLength {
+                throw err(.valueTooLong, validStringPrefix(strbuf, count: 50))
             }
             
             if c == Ascii.backslash {
@@ -619,8 +672,8 @@ public final class JsonInputStream {
         }
         
         let ch = Character(u)
-        if strbuf.count + ch.utf8.count >= maxStringLength {
-            throw err(.stringTooLong, validStringPrefix(strbuf, count: 50))
+        if strbuf.count + ch.utf8.count >= maxValueLength {
+            throw err(.valueTooLong, validStringPrefix(strbuf, count: 50))
         }
         
         let appended = ch.utf8.withContiguousStorageIfAvailable { buf in
@@ -750,6 +803,10 @@ public final class JsonInputStream {
     }
     
     func pushback() {
+        guard pos > 0 else {
+            return
+        }
+        
         pos -= 1
         
         if buf[pos] == Ascii.lf {

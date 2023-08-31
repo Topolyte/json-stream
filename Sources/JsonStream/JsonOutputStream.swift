@@ -38,7 +38,7 @@ public class JsonOutputStream {
     public var index: Int = -1
     
     var stream: OutputStream
-    let isOwningStream: Bool
+    let closeStream: Bool
     let context: JsonContext
         
     public init(path: String) throws {
@@ -47,31 +47,34 @@ public class JsonOutputStream {
         }
         
         self.stream = stream
-        self.isOwningStream = true
+        self.closeStream = true
         self.context = .root
         
         stream.open()
         try checkStreamStatus()
     }
     
-    public init(stream: OutputStream) {
+    public init(stream: OutputStream) throws {
         self.stream = stream
-        self.isOwningStream = false
         self.context = .root
         
         if self.stream.streamStatus == .notOpen {
             self.stream.open()
+            self.closeStream = true
+            try checkStreamStatus()
+        } else {
+            self.closeStream = false
         }
     }
     
     init(stream: OutputStream, context: JsonContext) {
         self.stream = stream
-        self.isOwningStream = false
+        self.closeStream = false
         self.context = context
     }
     
     deinit {
-        if isOwningStream {
+        if closeStream {
             stream.close()
         }
     }

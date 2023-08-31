@@ -4,29 +4,29 @@ import XCTest
 final class JsonOutputStreamTests: XCTestCase {
 
     func testRootLiterals() throws {
-        var jos = makeStream()
+        var jos = try makeStream()
         try jos.write(1.2)
         XCTAssertEqual(toString(jos), "1.2")
         
-        jos = makeStream()
+        jos = try makeStream()
         try jos.write("abc 123")
         XCTAssertEqual(toString(jos), #""abc 123""#)
         
-        jos = makeStream()
+        jos = try makeStream()
         try jos.write(true)
         XCTAssertEqual(toString(jos), "true")
         
-        jos = makeStream()
+        jos = try makeStream()
         try jos.write(false)
         XCTAssertEqual(toString(jos), "false")
 
-        jos = makeStream()
+        jos = try makeStream()
         try jos.writeNull()
         XCTAssertEqual(toString(jos), "null")
     }
     
     func testArray() throws {
-        let jos = makeStream()
+        let jos = try makeStream()
         try jos.writeArray { array in
             try array.write("abc 123")
             try array.writeArray { nested in
@@ -39,7 +39,7 @@ final class JsonOutputStreamTests: XCTestCase {
     }
     
     func testObject() throws {
-        let jos = makeStream()
+        let jos = try makeStream()
         try jos.writeObject { obj in
             try obj.write("string", "abc 123")
             try obj.writeArray("values") { array in
@@ -56,14 +56,14 @@ final class JsonOutputStreamTests: XCTestCase {
     }
     
     func testStringEscaping() throws {
-        let jos = makeStream()
+        let jos = try makeStream()
         let s = "line one\nline two\n\tindented"
         try jos.write(s)
         XCTAssertEqual(toString(jos), "\"line one\\nline two\\n\\tindented\"")
     }
     
     func testJsonLinesFormat() throws {
-        let jos = makeStream()
+        let jos = try makeStream()
         
         try jos.writeObject { obj in
             try obj.write("the key", "abc 123")
@@ -82,9 +82,9 @@ final class JsonOutputStreamTests: XCTestCase {
     }
     
     
-    func makeStream() -> JsonOutputStream {
+    func makeStream() throws -> JsonOutputStream {
         let memStream = OutputStream(toMemory: ())
-        let jos = JsonOutputStream(stream: memStream)
+        let jos = try JsonOutputStream(stream: memStream)
         return jos
     }
     
