@@ -61,7 +61,7 @@ public enum JsonKey: CustomStringConvertible, Equatable {
     }
 }
 
-public enum JsonNumber: Equatable{
+public enum JsonNumber: Equatable {
     case int(Int64)
     case double(Double)
     case decimal(Decimal)
