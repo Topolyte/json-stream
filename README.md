@@ -118,6 +118,25 @@ func example1() throws {
 
 ```
 
+Alteratively you can use a for-in loop instead of the throwing read() function:
+
+```
+func example1a() throws {
+    
+    let jis = try JsonInputStream(filePath: countriesPath)
+
+    for tokenResult in jis {
+        switch tokenResult {
+        case let .success(token):
+            print(token)
+        case let .failure(error):
+            throw error
+        }
+    }
+}
+
+```
+
 After creating a JsonInputStream it can be iterated over exactly once.
 After the loop has run its course, jis.read() will only ever return nil.
 This is why we are re-creating the JsonInputStream before each example.

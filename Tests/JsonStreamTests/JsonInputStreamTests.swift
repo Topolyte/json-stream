@@ -408,6 +408,34 @@ final class JsonInputStreamTests: XCTestCase {
         XCTAssertNil(try jis.read())
     }
 
+    func testForInLoop() throws {
+        let s = """
+        [1, 2.0, "three"]
+        """
+        
+        let expected: [JsonToken] = [
+            .startArray(nil),
+            .number(.index(0), .int(1)),
+            .number(.index(1), .double(2.0)),
+            .string(.index(2), "three"),
+            .endArray(nil)
+        ]
+        
+        let jis = try makeStream(s)
+        
+        var i = 0
+        for tokenResult in jis {
+            switch tokenResult {
+            case let .success(token):
+                XCTAssertEqual(expected[i], token)
+            case let .failure(error):
+                throw error
+            }
+            i += 1
+        }
+    }
+
+    
     func testBuffering() throws {
         let s = """
         {
@@ -472,9 +500,8 @@ final class JsonInputStreamTests: XCTestCase {
             
     func makeStream(_ s: String, bufferCapacity: Int? = nil,
                     maxValueLength: Int? = nil,
-                    numberParsing: JsonInputStream.NumberParsing = .intDouble)
-    throws -> JsonInputStream {
-        
+                    numberParsing: JsonInputStream.NumberParsing = .intDouble) throws -> JsonInputStream
+    {
         let stream = InputStream(data: s.data(using: .utf8)!)
         stream.open()
         

@@ -78,7 +78,7 @@ public enum JsonToken: Equatable {
     case null(_ key: JsonKey?)
 }
     
-public final class JsonInputStream {
+public final class JsonInputStream: Sequence, IteratorProtocol {
     enum ParseState {
         case root
         case object(Int)
@@ -310,6 +310,17 @@ public final class JsonInputStream {
                 }
                 return token
             }
+        }
+    }
+    
+    public func next() -> Result<JsonToken, Error>? {
+        do {
+            if let token = try read() {
+                return .success(token)
+            }
+            return nil
+        } catch {
+            return .failure(error)
         }
     }
     
@@ -638,7 +649,7 @@ public final class JsonInputStream {
             return ""
         }
         
-        let len = min(count, data.count)
+        let len = Swift.min(count, data.count)
         var end = len - 1
         
         while end > 0 && !isUtf8Start(data[end]) {
@@ -797,7 +808,7 @@ public final class JsonInputStream {
     }
     
     func readRawAvailable(_ count: Int) -> String {
-        let n = min(count, end - pos)
+        let n = Swift.min(count, end - pos)
         if n < 1 {
             return ""
         }

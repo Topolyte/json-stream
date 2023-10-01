@@ -44,6 +44,20 @@ final class DocumentationTests: XCTestCase {
                 print(token)
             }
         }
+        
+        func example1a() throws {
+            let jis = try JsonInputStream(filePath: countriesPath)
+
+            for tokenResult in jis {
+                switch tokenResult {
+                case let .success(token):
+                    print(token)
+                case let .failure(error):
+                    throw error
+                }
+            }
+        }
+
                 
         func example2() throws {
             let jis = try JsonInputStream(filePath: countriesPath)
