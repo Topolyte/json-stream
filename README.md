@@ -56,7 +56,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(name: "<your target>", dependencies: [
-            .product(name: "JsonStream", package: "https://github.com/Topolyte/json-stream.git"),
+            .product(name: "JsonStream", package: "json-stream"),
         ])
     ]
 )
